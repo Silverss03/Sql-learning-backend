@@ -22,3 +22,52 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Laravel & PHP
+/vendor
+/node_modules
+/public/storage
+/storage/*.key
+/.env
+/.env.*
+/.env.local
+Homestead.yaml
+Homestead.json
+/.phpunit.result.cache
+
+# Laravel Mix / Vite
+/public/hot
+/public/build
+/public/js
+/public/css
+/public/mix-manifest.json
+
+# IDE & Editor junk
+/.idea
+/.vscode
+*.swp
+*.swo
+*.swn
+*.swn
+*.sublime-project
+*.sublime-workspace
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Composer & NPM logs
+composer.lock
+package-lock.json
+npm-debug.log
+yarn-error.log
+pnpm-lock.yaml
+
+# PHPUnit
+.phpunit.cache
+.phpunit.result.cache
+coverage/
+
+# Misc
+.env.backup
+.env.example.local

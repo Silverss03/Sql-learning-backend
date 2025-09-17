@@ -15,7 +15,6 @@ return new class extends Migration
             $table->id();
             $table->foreignId('question_id')->references('id')->on('questions')->onDelete('cascade');
             $table->text('description')->nullable();
-            $table->integer('order_index')->default(0);
             $table->boolean('is_active')->default(true);
             $table->string('expected_result')->nullable();
             $table->string('setup_sql')->nullable();

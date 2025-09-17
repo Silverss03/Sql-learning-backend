@@ -21,6 +21,10 @@ class User extends Authenticatable
         'name',
         'email',
         'password',
+        'role',
+        'is_active',
+        'remember_token',
+        'image_url'
     ];
 
     /**
@@ -44,5 +48,18 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
         ];
+    }
+
+    public function admin()
+    {
+        return $this->hasOne(Admin::class);
+    }
+    public function teacher()
+    {
+        return $this->hasOne(Teacher::class);
+    }
+    public function student()
+    {
+        return $this->hasOne(Student::class);    
     }
 }

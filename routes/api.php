@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Topic;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Hash;
@@ -69,7 +70,32 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     Route::post('/logout', function (Request $request) {
-        $request->user()->currentAccessToken()->delete();
+        $request->user()->tokens()->delete();
+        
         return response()->json(['message' => 'Logout successful']);
+    });
+    
+    Route::get('/topics', function() {
+        $topic = Topic::where('is_active', true)->orderBy('order_index')->get();
+    
+        return response()->json([
+            'message' => 'Topics retrieved successfully',
+            'topics' => $topic
+        ]);
+    });
+    
+    Route::get('/topics/{topic}/lessons', function(Topic $topic) {
+        if(!$topic->is_active) {
+            return response()->json([
+                'message' => 'Topic not found or inactive'
+            ], 404);
+        }
+    
+        $lessons = $topic->lessons()->where('is_active', true)->orderBy('order_index')->get();
+    
+        return response()->json([
+            'message' => 'Lessons retrieved successfully',
+            'lessons' => $lessons
+        ]);
     });
 });

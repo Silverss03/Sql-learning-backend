@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('topic_id')->references('id')->on('topics')->onDelete('cascade');
             $table->string('lesson_title')->nullable();
-            $table->string('lesson_content');
+            $table->longText('lesson_content');
             $table->string('slug')->nullable();
             $table->integer('estimated_time')->default(5); // in minutes
             $table->integer('order_index')->default(0);

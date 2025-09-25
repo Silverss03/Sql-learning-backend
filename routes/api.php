@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Lesson;
 use App\Models\Topic;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
@@ -75,6 +76,7 @@ Route::middleware('auth:sanctum')->group(function () {
         return response()->json(['message' => 'Logout successful']);
     });
     
+    //get topics
     Route::get('/topics', function() {
         $topic = Topic::where('is_active', true)->orderBy('order_index')->get();
     
@@ -84,6 +86,7 @@ Route::middleware('auth:sanctum')->group(function () {
         ]);
     });
     
+    //get lessons by topic
     Route::get('/topics/{topic}/lessons', function(Topic $topic) {
         if(!$topic->is_active) {
             return response()->json([
@@ -98,4 +101,72 @@ Route::middleware('auth:sanctum')->group(function () {
             'lessons' => $lessons
         ]);
     });
+    
+    //get questions by lesson
+    Route::get('/lessons/{lesson}/questions', function($lessonId) {
+        $lesson = Lesson::where('id', $lessonId)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$lesson) {
+            return response()->json([
+                'message' => 'Lesson not found or inactive'
+            ], 404);    
+        }
+
+        $questions = $lesson->question()->where('is_active', true)->orderBy('order_index')->get();
+
+        return response()->json([
+            'message' => 'Questions retrieved successfully',
+            'questions' => $questions
+        ]);
+    });
+
+    //get multichoice questions
+    Route::get('/lessons/{lesson}/multichoice-questions', function($lessonId) {
+        $lesson = Lesson::where('id', $lessonId)
+            ->where('is_active', true)
+            ->first();
+        
+        if (!$lesson) {
+            return response()->json([
+                'message' => 'Lesson not found or inactive'
+            ], 404);    
+        }
+
+        $questions = $lesson->questions()
+                            ->where('is_active', true)
+                            ->where('question_type', 'multiple_choice')
+                            ->orderBy('order_index'
+                            )->get();
+
+        return response()->json([
+            'message' => 'Multiple choice questions retrieved successfully',
+            'questions' => $questions
+        ]);
+    });
+
+    //get all SQL questions
+    Route::get('/lessons/{lesson}/question/sql', function($lessonId){
+        $lesson = Lesson::where('id', $lessonId)
+                        ->where('is_active', true)
+                        ->first();  
+        
+        if (!$lesson) {
+            return response()->json([
+                'message' => 'Lesson not found or inactive'
+            ], 404);    
+        }
+
+        $questions = $lesson->questions()
+                            ->where('is_active', true)
+                            ->where('question_type', 'sql')
+                            ->orderBy('order_index')
+                            ->get();
+
+        return response()->json([
+            'message' => 'SQL questions retrieved successfully',
+            'questions' => $questions
+        ]);
+    }); 
 });

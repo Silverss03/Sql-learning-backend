@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\SqlExecutionController;
 use App\Models\Lesson;
 use App\Models\Topic;
 use Illuminate\Http\Request;
@@ -14,159 +15,293 @@ Route::get('/test', function () {
 
 // Registration
 Route::post('/register', function (Request $request) {
-    $request->validate([
-        'name' => 'required|string|max:255',
-        'email' => 'required|email|unique:users',
-        'password' => 'required|min:8|confirmed',
-        'role' => 'required|in:admin,teacher,student'
-    ]);
+    try {
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users',
+            'password' => 'required|min:8|confirmed',
+            'role' => 'required|in:admin,teacher,student'
+        ]);
 
-    $user = User::create([
-        'name' => $request->name,
-        'email' => $request->email,
-        'password' => Hash::make($request->password),
-        'role' => $request->role,
-        'is_active' => true
-    ]);
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+            'role' => $request->role,
+            'is_active' => true
+        ]);
 
-    $token = $user->createToken('auth-token')->plainTextToken;
+        $token = $user->createToken('auth-token')->plainTextToken;
 
-    return response()->json([
-        'message' => 'Registration successful',
-        'user' => $user,
-        'token' => $token,
-        'token_type' => 'Bearer'
-    ], 201);
+        return response()->json([
+            'data' => [
+                'user' => $user,
+                'access_token' => $token,
+                'token_type' => 'Bearer'
+            ],
+            'message' => 'Registration successful',
+            'success' => true,
+            'remark' => 'User registered and authenticated successfully'
+        ], 201);
+
+    } catch (\Illuminate\Validation\ValidationException $e) {
+        return response()->json([
+            'data' => null,
+            'message' => 'Validation failed',
+            'success' => false,
+            'remark' => $e->errors()
+        ], 422);
+    } catch (\Exception $e) {
+        return response()->json([
+            'data' => null,
+            'message' => 'Registration failed',
+            'success' => false,
+            'remark' => $e->getMessage()
+        ], 500);
+    }
 });
 
 // Login
 Route::post('/login', function(Request $request) {
-    $request->validate([
-        'email' => 'required|email',
-        'password' => 'required'
-    ]);
+    try {
+        $request->validate([
+            'email' => 'required|email',
+            'password' => 'required'
+        ]);
 
-    $user = User::where('email', $request->email)->first();
+        $user = User::where('email', $request->email)->first();
 
-    if (!$user || !Hash::check($request->password, $user->password)) {
+        if (!$user || !Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Invalid credentials',
+                'success' => false,
+                'remark' => 'Email or password is incorrect'
+            ], 401);
+        }
+
+        $token = $user->createToken('auth-token')->plainTextToken;
+
         return response()->json([
-            'message' => 'Invalid credentials'
-        ], 401);
+            'data' => [
+                'user' => $user,
+                'access_token' => $token,
+                'token_type' => 'Bearer'
+            ],
+            'message' => 'Login successful',
+            'success' => true,
+            'remark' => 'User authenticated successfully'
+        ]);
+
+    } catch (\Illuminate\Validation\ValidationException $e) {
+        return response()->json([
+            'data' => null,
+            'message' => 'Validation failed',
+            'success' => false,
+            'remark' => $e->errors()
+        ], 422);
+    } catch (\Exception $e) {
+        return response()->json([
+            'data' => null,
+            'message' => 'Login failed',
+            'success' => false,
+            'remark' => $e->getMessage()
+        ], 500);
     }
-
-    $token = $user->createToken('auth-token')->plainTextToken;
-
-    return response()->json([
-        'message' => 'Login successful',
-        'user' => $user,
-        'token' => $token,
-        'token_type' => 'Bearer'
-    ]);
 });
 
 // Protected routes
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', function (Request $request) {
-        return $request->user();
+        return response()->json([
+            'data' => $request->user(),
+            'message' => 'User data retrieved successfully',
+            'success' => true,
+            'remark' => 'Current authenticated user information'
+        ]);
     });
 
     Route::post('/logout', function (Request $request) {
-        $request->user()->tokens()->delete();
-        
-        return response()->json(['message' => 'Logout successful']);
+        try {
+            $request->user()->tokens()->delete();
+            
+            return response()->json([
+                'data' => null,
+                'message' => 'Logout successful',
+                'success' => true,
+                'remark' => 'All user tokens have been revoked'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Logout failed',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
     });
     
-    //get topics
+    // Get topics
     Route::get('/topics', function() {
-        $topic = Topic::where('is_active', true)->orderBy('order_index')->get();
-    
-        return response()->json([
-            'message' => 'Topics retrieved successfully',
-            'topics' => $topic
-        ]);
+        try {
+            $topics = Topic::where('is_active', true)->orderBy('order_index')->get();
+        
+            return response()->json([
+                'data' => $topics,
+                'message' => 'Topics retrieved successfully',
+                'success' => true,
+                'remark' => 'All active topics ordered by index'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve topics',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
     });
     
-    //get lessons by topic
+    // Get lessons by topic
     Route::get('/topics/{topic}/lessons', function(Topic $topic) {
-        if(!$topic->is_active) {
+        try {
+            if(!$topic->is_active) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Topic not found or inactive',
+                    'success' => false,
+                    'remark' => 'The requested topic is not available'
+                ], 404);
+            }
+
+            $lessons = $topic->lessons()->where('is_active', true)->orderBy('order_index')->get();
+
             return response()->json([
-                'message' => 'Topic not found or inactive'
-            ], 404);
+                'data' => $lessons,
+                'message' => 'Lessons retrieved successfully',
+                'success' => true,
+                'remark' => 'All active lessons for the specified topic'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve lessons',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
         }
-    
-        $lessons = $topic->lessons()->where('is_active', true)->orderBy('order_index')->get();
-    
-        return response()->json([
-            'message' => 'Lessons retrieved successfully',
-            'lessons' => $lessons
-        ]);
     });
     
-    //get questions by lesson
+    // Get questions by lesson
     Route::get('/lessons/{lesson}/questions', function($lessonId) {
-        $lesson = Lesson::where('id', $lessonId)
-            ->where('is_active', true)
-            ->first();
+        try {
+            $lesson = Lesson::where('id', $lessonId)
+                ->where('is_active', true)
+                ->first();
 
-        if (!$lesson) {
+            if (!$lesson) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson not found or inactive',
+                    'success' => false,
+                    'remark' => 'The requested lesson is not available'
+                ], 404);    
+            }
+
+            $questions = $lesson->questions()->where('is_active', true)->orderBy('order_index')->get();
+
             return response()->json([
-                'message' => 'Lesson not found or inactive'
-            ], 404);    
+                'data' => $questions,
+                'message' => 'Questions retrieved successfully',
+                'success' => true,
+                'remark' => 'All active questions for the specified lesson'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve questions',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
         }
-
-        $questions = $lesson->question()->where('is_active', true)->orderBy('order_index')->get();
-
-        return response()->json([
-            'message' => 'Questions retrieved successfully',
-            'questions' => $questions
-        ]);
     });
 
-    //get multichoice questions
+    // Get multiple choice questions
     Route::get('/lessons/{lesson}/multichoice-questions', function($lessonId) {
-        $lesson = Lesson::where('id', $lessonId)
-            ->where('is_active', true)
-            ->first();
-        
-        if (!$lesson) {
+        try {
+            $lesson = Lesson::where('id', $lessonId)
+                ->where('is_active', true)
+                ->first();
+            
+            if (!$lesson) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson not found or inactive',
+                    'success' => false,
+                    'remark' => 'The requested lesson is not available'
+                ], 404);    
+            }
+
+            $questions = $lesson->questions()
+                                ->where('is_active', true)
+                                ->where('question_type', 'multiple_choice')
+                                ->orderBy('order_index')
+                                ->get();
+
             return response()->json([
-                'message' => 'Lesson not found or inactive'
-            ], 404);    
+                'data' => $questions,
+                'message' => 'Multiple choice questions retrieved successfully',
+                'success' => true,
+                'remark' => 'All active multiple choice questions for the specified lesson'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve multiple choice questions',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
         }
-
-        $questions = $lesson->questions()
-                            ->where('is_active', true)
-                            ->where('question_type', 'multiple_choice')
-                            ->orderBy('order_index'
-                            )->get();
-
-        return response()->json([
-            'message' => 'Multiple choice questions retrieved successfully',
-            'questions' => $questions
-        ]);
     });
 
-    //get all SQL questions
-    Route::get('/lessons/{lesson}/question/sql', function($lessonId){
-        $lesson = Lesson::where('id', $lessonId)
-                        ->where('is_active', true)
-                        ->first();  
-        
-        if (!$lesson) {
-            return response()->json([
-                'message' => 'Lesson not found or inactive'
-            ], 404);    
-        }
-
-        $questions = $lesson->questions()
+    // Get SQL questions
+    Route::get('/lessons/{lesson}/questions/sql', function($lessonId){
+        try {
+            $lesson = Lesson::where('id', $lessonId)
                             ->where('is_active', true)
-                            ->where('question_type', 'sql')
-                            ->orderBy('order_index')
-                            ->get();
+                            ->first();  
+            
+            if (!$lesson) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson not found or inactive',
+                    'success' => false,
+                    'remark' => 'The requested lesson is not available'
+                ], 404);    
+            }
 
-        return response()->json([
-            'message' => 'SQL questions retrieved successfully',
-            'questions' => $questions
-        ]);
+            $questions = $lesson->questions()
+                                ->where('is_active', true)
+                                ->where('question_type', 'sql')
+                                ->orderBy('order_index')
+                                ->get();
+
+            return response()->json([
+                'data' => $questions,
+                'message' => 'SQL questions retrieved successfully',
+                'success' => true,
+                'remark' => 'All active SQL questions for the specified lesson'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve SQL questions',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
     }); 
 });
+
+Route::post('/execute-sql', [SqlExecutionController::class, 'executeQuery']);
+Route::get('/questions/{id}', [SqlExecutionController::class, 'getQuestion']);

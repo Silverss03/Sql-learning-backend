@@ -26,6 +26,20 @@ return [
             ]) : [],
         ],
 
+        'question_template' => [
+            'driver' => 'mysql',
+            'host' => env('QUESTION_DB_HOST', '127.0.0.1'),
+            'port' => env('QUESTION_DB_PORT', '3306'),
+            'database' => null,
+            'username' => env('QUESTION_DB_USERNAME', 'root'),
+            'password' => env('QUESTION_DB_PASSWORD', ''),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix' => '',
+            'strict' => true,
+            'engine' => null,
+        ]
+
         // 'sandbox' => [
         //     'driver' => 'mysql',
         //     'host' => env('SANDBOX_DB_HOST', env('DB_HOST', '127.0.0.1')),

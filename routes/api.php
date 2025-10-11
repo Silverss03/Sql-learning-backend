@@ -7,6 +7,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
+use App\Models\MultipleChoiceQuestion;
+use App\Models\SQLQuestion;
+use App\Models\Question;
 
 // Test route
 Route::get('/test', function () {
@@ -228,79 +231,52 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Get multiple choice questions
     Route::get('/lessons/{lesson}/multichoice-questions', function($lessonId) {
-        try {
-            $lesson = Lesson::where('id', $lessonId)
-                ->where('is_active', true)
-                ->first();
-            
-            if (!$lesson) {
-                return response()->json([
-                    'data' => null,
-                    'message' => 'Lesson not found or inactive',
-                    'success' => false,
-                    'remark' => 'The requested lesson is not available'
-                ], 404);    
-            }
+        $questions = Question::where('lesson_id', $lessonId)
+            ->where('is_active', true)
+            ->where('question_type', 'multiple_choice')
+            ->orderBy('order_index')
+            ->with('multipleChoice')
+            ->get();
 
-            $questions = $lesson->questions()
-                                ->where('is_active', true)
-                                ->where('question_type', 'multiple_choice')
-                                ->orderBy('order_index')
-                                ->get();
+        $multipleChoiceQuestions = $questions->pluck('multipleChoice')->filter();
 
-            return response()->json([
-                'data' => $questions,
-                'message' => 'Multiple choice questions retrieved successfully',
-                'success' => true,
-                'remark' => 'All active multiple choice questions for the specified lesson'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Failed to retrieve multiple choice questions',
-                'success' => false,
-                'remark' => $e->getMessage()
-            ], 500);
-        }
+        return response()->json([
+            'data' => $multipleChoiceQuestions,
+            'message' => 'Multiple choice questions retrieved successfully',
+            'success' => true,
+            'remark' => 'All active multiple choice questions for the specified lesson'
+        ]);
     });
 
     // Get SQL questions
-    Route::get('/lessons/{lesson}/questions/sql', function($lessonId){
-        try {
-            $lesson = Lesson::where('id', $lessonId)
-                            ->where('is_active', true)
-                            ->first();  
-            
-            if (!$lesson) {
-                return response()->json([
-                    'data' => null,
-                    'message' => 'Lesson not found or inactive',
-                    'success' => false,
-                    'remark' => 'The requested lesson is not available'
-                ], 404);    
-            }
+    Route::get('/lessons/{lesson}/questions/interactive-sql', function ($lessonId) {
+    try {
+        // Fetch all questions of type 'interactive_sql' for the given lesson
+        $questions = Question::where('lesson_id', $lessonId)
+            ->where('is_active', true)
+            ->where('question_type', 'sql')
+            ->orderBy('order_index')
+            ->with('interactiveSqlQuestion') // Eager load the related InteractiveSqlQuestion
+            ->get();
 
-            $questions = $lesson->questions()
-                                ->where('is_active', true)
-                                ->where('question_type', 'sql')
-                                ->orderBy('order_index')
-                                ->get();
+        // Extract the interactive SQL question data
+        $interactiveSqlQuestions = $questions->pluck('interactiveSqlQuestion')->filter();
 
-            return response()->json([
-                'data' => $questions,
-                'message' => 'SQL questions retrieved successfully',
-                'success' => true,
-                'remark' => 'All active SQL questions for the specified lesson'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Failed to retrieve SQL questions',
-                'success' => false,
-                'remark' => $e->getMessage()
-            ], 500);
-        }
-    }); 
+        return response()->json([
+            'data' => $interactiveSqlQuestions,
+            'message' => 'Interactive SQL questions retrieved successfully',
+            'success' => true,
+            'remark' => 'All active interactive SQL questions for the specified lesson',
+        ]);
+    } catch (\Exception $e) {
+        return response()->json([
+            'data' => null,
+            'message' => 'Failed to retrieve interactive SQL questions',
+            'success' => false,
+            'remark' => $e->getMessage(),
+        ], 500);
+    }
+});
 });
 
 Route::post('/execute-sql', [SqlExecutionController::class, 'executeQuery']);

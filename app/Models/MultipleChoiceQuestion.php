@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class MultipleChoiceQuestion extends Model
 {
+    protected $table = 'multiple_choices_questions';
     protected $fillable = [
         'question_id',
         'description',

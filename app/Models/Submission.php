@@ -6,7 +6,15 @@ use Illuminate\Database\Eloquent\Model;
 
 class Submission extends Model
 {
-    protected $fillable = ['student_id', 'question_id', 'submitted_sql', 'is_correct', 'submitted_at', 'error_message', 'chosen_answer'];
+    protected $fillable = [
+        'student_id', 
+        'question_id', 
+        'submitted_sql', 
+        'is_correct', 
+        'submitted_at', 
+        'chosen_answer',
+        'question_type'
+    ];
 
     public function student()
     {

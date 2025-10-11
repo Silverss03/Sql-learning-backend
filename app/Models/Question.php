@@ -18,8 +18,8 @@ class Question extends Model
         return $this->hasOne(MultipleChoiceQuestion::class);
     }
 
-    public function sqlQuestion()
+    public function interactiveSqlQuestion()
     {
-        return $this->hasOne(SqlQuestion::class);
+        return $this->hasOne(InteractiveSqlQuestion::class, 'question_id');
     }
 }

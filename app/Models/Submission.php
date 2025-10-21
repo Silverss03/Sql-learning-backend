@@ -8,12 +8,9 @@ class Submission extends Model
 {
     protected $fillable = [
         'student_id', 
+        'lesson_exercise_id',
         'question_id', 
-        'submitted_sql', 
-        'is_correct', 
-        'submitted_at', 
-        'chosen_answer',
-        'question_type'
+        'score'
     ];
 
     public function student()
@@ -21,8 +18,8 @@ class Submission extends Model
         return $this->belongsTo(Student::class);
     }
 
-    public function question()
+    public function lessonExercise()
     {
-        return $this->belongsTo(Question::class);
+        return $this->belongsTo(LessonExercise::class);
     }
 }

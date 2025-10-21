@@ -17,4 +17,9 @@ class Lesson extends Model
     {
         return $this->hasMany(Question::class);
     }
+
+    public function studentProgress()
+    {
+        return $this->hasMany(StudentLessonProgress::class);
+    }
 }

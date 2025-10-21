@@ -26,4 +26,9 @@ class Student extends Model
     {
         return $this->hasMany(Submission::class);
     }
+
+    public function lessonProgress()
+    {
+        return $this->hasMany(StudentLessonProgress::class);
+    }
 }

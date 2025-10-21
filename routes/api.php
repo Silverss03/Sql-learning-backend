@@ -7,9 +7,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Hash;
 use App\Models\User;
-use App\Models\MultipleChoiceQuestion;
-use App\Models\SQLQuestion;
-use App\Models\Question;
+use App\Models\LessonExercise;
+use App\Models\Student;
+use App\Models\Submission;
+use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
+use App\Models\StudentLessonProgress;
 
 // Test route
 Route::get('/test', function () {
@@ -229,55 +232,376 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    // Get multiple choice questions
-    Route::get('/lessons/{lesson}/multichoice-questions', function($lessonId) {
-        $questions = Question::where('lesson_id', $lessonId)
-            ->where('is_active', true)
-            ->where('question_type', 'multiple_choice')
-            ->orderBy('order_index')
-            ->with('multipleChoice')
-            ->get();
+    Route::get('/lessons/{lesson}/exercise', function($lessonId) {
+        try {
+            $lessonExercise = LessonExercise::where('lesson_id', $lessonId)
+                ->where('is_active', true)
+                ->first();
 
-        $multipleChoiceQuestions = $questions->pluck('multipleChoice')->filter();
+            if (!$lessonExercise) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson exercise not found or inactive',
+                    'success' => false,
+                    'remark' => 'The requested lesson exercise is not available'
+                ], 404);
+            }
 
-        return response()->json([
-            'data' => $multipleChoiceQuestions,
-            'message' => 'Multiple choice questions retrieved successfully',
-            'success' => true,
-            'remark' => 'All active multiple choice questions for the specified lesson'
-        ]);
+            // Retrieve questions related to the lesson exercise
+            $questions = $lessonExercise->questions()->where('is_active', true)->get();
+
+            // Separate questions into multiple-choice and SQL questions
+            $multipleChoiceQuestions = $questions->map(function ($question) {
+                return $question->multipleChoice;
+            })->filter();
+
+            $sqlQuestions = $questions->map(function ($question) {
+                return $question->interactiveSqlQuestion;
+            })->filter();
+
+            return response()->json([
+                'data' => [
+                    'lessonExercise' => $lessonExercise,
+                    'questions' => [
+                        'multipleChoice' => $multipleChoiceQuestions,
+                        'sqlQuestions' => $sqlQuestions
+                    ]
+                ],
+                'message' => 'Lesson exercise and questions retrieved successfully',
+                'success' => true,
+                'remark' => 'Active lesson exercise and its questions for the specified lesson'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve lesson exercise',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
     });
 
-    // Get SQL questions
-    Route::get('/lessons/{lesson}/questions/interactive-sql', function ($lessonId) {
-    try {
-        // Fetch all questions of type 'interactive_sql' for the given lesson
-        $questions = Question::where('lesson_id', $lessonId)
-            ->where('is_active', true)
-            ->where('question_type', 'sql')
-            ->orderBy('order_index')
-            ->with('interactiveSqlQuestion') // Eager load the related InteractiveSqlQuestion
-            ->get();
+    Route::post('/exercise/submit', function(Request $request) {
+        try {
+            $request->validate([
+                'user_id' => 'required|exists:users,id',
+                'lesson_exercise_id' => 'required|exists:lesson_exercises,id',
+                'score' => 'required|numeric|min:0'
+            ]);
 
-        // Extract the interactive SQL question data
-        $interactiveSqlQuestions = $questions->pluck('interactiveSqlQuestion')->filter();
+            $student = Student::where('user_id', $request->user_id)->first();
 
-        return response()->json([
-            'data' => $interactiveSqlQuestions,
-            'message' => 'Interactive SQL questions retrieved successfully',
-            'success' => true,
-            'remark' => 'All active interactive SQL questions for the specified lesson',
-        ]);
-    } catch (\Exception $e) {
-        return response()->json([
-            'data' => null,
-            'message' => 'Failed to retrieve interactive SQL questions',
-            'success' => false,
-            'remark' => $e->getMessage(),
-        ], 500);
-    }
-});
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found for the given user ID',
+                    'success' => false,
+                    'remark' => 'The user does not have a corresponding student record'
+                ], 404);
+            }
+
+            $submission = Submission::create([
+                'student_id' => $student->id,
+                'lesson_exercise_id' => $request->lesson_exercise_id,
+                'score' => $request->score,
+            ]);
+
+            $lessonExercise = LessonExercise::find($request->lesson_exercise_id);
+            $lessonId = $lessonExercise->lesson_id;
+
+            StudentLessonProgress::updateOrCreate(
+                ['student_id' => $student->id, 'lesson_id' => $lessonId],
+                ['finished_at' => now()]
+            );
+
+            return response()->json([
+                'data' => $submission,
+                'message' => 'Exercise submitted successfully',
+                'success' => true,
+                'remark' => 'Submission record created'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to submit exercise result',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/students/average-score', function(Request $request) {
+        try {
+            $request->validate([
+                'user_id' => 'required|exists:users,id'
+            ]);
+
+            $student = Student::where('user_id', $request->user_id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found for the given user ID',
+                    'success' => false,
+                    'remark' => 'The user does not have a corresponding student record'
+                ], 404);
+            }
+
+            $highestScore = DB::table('submissions')
+                    ->selectRaw('lesson_exercise_id, MAX(score) as max_score')
+                    ->where('student_id', $student->id)
+                    ->groupBy('lesson_exercise_id')
+                    ->get();
+            
+            $averageScore = $highestScore->avg('max_score') ?? 0;
+
+            return response()->json([
+                'data' => [
+                    'student_id' => $student->id,
+                    'average_score' => $averageScore
+                ],
+                'message' => 'Average score calculated successfully',
+                'success' => true,
+                'remark' => 'Computed average of highest scores per lesson exercise'
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to calculate average score',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/topics/{topic}/progress', function(Request $request, Topic $topic) {
+        try {
+            $request->validate([
+                'user_id' => 'required|exists:users,id'
+            ]);
+
+            $student = Student::where('user_id', $request->user_id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record associated with the given user ID'
+                ], 404);
+            }
+
+            $totalLessons = $topic->lessons()->where('is_active', true)->count();
+
+            $completedLessons = StudentLessonProgress::where('student_id', $student->id)
+                ->whereHas('lesson', function($q) use ($topic) {
+                    $q->where('topic_id', $topic->id);
+                })
+                ->count();
+            
+            $progress = $totalLessons > 0 ? ($completedLessons / $totalLessons) * 100 : 0;
+
+            return response()->json([
+                'data' => [
+                    'topic_id' => $topic->id,
+                    'total_lessons' => $totalLessons,
+                    'completed_lessons' => $completedLessons,
+                    'progress_percentage' => round($progress, 2)
+                ],
+                'message' => 'Topic progress retrieved successfully',
+                'success' => true,
+                'remark' => 'Calculated student progress for the specified topic'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve topic progress',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/students/progress', function(Request $request) {
+        try {
+            $request->validate([
+                'user_id' => 'required|exists:users,id'
+            ]); 
+
+            $student = Student::where('user_id', $request->user_id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record associated with the given user ID'
+                ], 404);
+            }
+
+            $totalLessons = Lesson::where('is_active', true)->count();
+            $completedLessons = StudentLessonProgress::where('student_id', $student->id)->count();
+
+            $progress = $totalLessons > 0 ? ($completedLessons / $totalLessons) * 100 : 0;
+
+            return response()->json([
+                'data' => [
+                    'total_lessons' => $totalLessons,
+                    'completed_lessons' => $completedLessons,
+                    'progress_percentage' => round($progress, 2)
+                ],
+                'message' => 'Student progress retrieved successfully',
+                'success' => true,
+                'remark' => 'Calculated overall student progress across all lessons'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve student progress',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/students/topics-progress', function(Request $request){
+        try {
+            $request->validate([
+                'user_id' => 'required|exists:users,id'
+            ]);
+
+            $student = Student::where('user_id', $request->user_id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record associated with the given user ID'
+                ], 404);
+            }
+
+            $topics = Topic::where('is_active', true)->get();
+            $progressData = [];
+
+            foreach ($topics as $topic) {
+                $totalLessons = $topic->lessons()->where('is_active', true)->count();
+                $completedLessons = StudentLessonProgress::where('student_id', $student->id)
+                    ->whereHas('lesson', function($q) use ($topic) {
+                        $q->where('topic_id', $topic->id);
+                    })
+                    ->count();
+                
+                $progress = $totalLessons > 0 ? ($completedLessons / $totalLessons) * 100 : 0;
+
+                $progressData[] = [
+                    'topic_id' => $topic->id,
+                    'topic_title' => $topic->title,
+                    'total_lessons' => $totalLessons,
+                    'completed_lessons' => $completedLessons,
+                    'progress_percentage' => round($progress, 2)
+                ];
+            }
+
+            return response()->json([
+                'data' => $progressData,
+                'message' => 'Topics progress retrieved successfully',
+                'success' => true,
+                'remark' => 'Calculated student progress for all active topics'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve topics progress',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
 });
 
 Route::post('/execute-sql', [SqlExecutionController::class, 'executeQuery']);
 Route::get('/questions/{id}', [SqlExecutionController::class, 'getQuestion']);
+
+Route::post('/lessons', function(Request $request) {
+    try {
+        $request->validate([
+            'topic_id'=> 'required|exists:topics,id',
+            'lesson_title'=> 'required|string|max:255',
+            'slug'=> 'nullable|string|max:255|unique:lessons,slug',
+            'lesson_content'=> 'nullable|string',
+            'estimated_time'=> 'nullable|integer',
+            'is_active'=> 'required|boolean',
+            'order_index'=> 'nullable|integer',
+            'created_by'=> 'required|exists:users,id'
+        ]);
+
+        $lesson = Lesson::create([
+            'topic_id' => $request->topic_id,
+            'lesson_title' => $request->lesson_title,
+            'slug' => $request->slug,
+            'lesson_content' => $request->lesson_content,
+            'estimated_time' => $request->estimated_time,
+            'is_active' => $request->is_active,
+            'order_index' => $request->order_index,
+            'created_by' => $request->created_by
+        ]);
+
+        return response()->json([
+            'data' => $lesson,
+            'message' => 'Lesson created successfully',
+            'success' => true,
+            'remark' => 'New lesson record created'
+        ], 201);
+    } catch (ValidationException $e) {
+        return response()->json([
+            'data' => null,
+            'message' => 'Validation failed',
+            'success' => false,
+            'remark' => $e->errors()
+        ], 422);
+    } catch (\Exception $e) {
+        return response()->json([
+            'data' => null,
+            'message' => 'Failed to create lesson',
+            'success' => false,
+            'remark' => $e->getMessage()
+        ], 500);
+    }
+});

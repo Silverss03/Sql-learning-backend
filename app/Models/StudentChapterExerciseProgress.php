@@ -4,24 +4,19 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class Submission extends Model
+class StudentChapterExerciseProgress extends Model
 {
     protected $fillable = [
-        'student_id', 
-        'lesson_exercise_id',
-        'question_id', 
-        'score',
+        'student_id',
         'chapter_exercise_id',
+        'is_completed',
+        'score',
+        'completed_at',
     ];
 
     public function student()
     {
         return $this->belongsTo(Student::class);
-    }
-
-    public function lessonExercise()
-    {
-        return $this->belongsTo(LessonExercise::class);
     }
 
     public function chapterExercise()

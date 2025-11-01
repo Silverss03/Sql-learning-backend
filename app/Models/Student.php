@@ -31,4 +31,9 @@ class Student extends Model
     {
         return $this->hasMany(StudentLessonProgress::class);
     }
+
+    public function chapterExerciseProgress()
+    {
+        return $this->hasMany(StudentChapterExerciseProgress::class);
+    }
 }

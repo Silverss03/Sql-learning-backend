@@ -13,6 +13,10 @@ use App\Models\Submission;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
 use App\Models\StudentLessonProgress;
+use App\Models\Admin;
+use App\Models\ChapterExercise;
+use App\Models\StudentChapterExerciseProgress;
+use Illuminate\Support\Facades\Redis;
 
 // Test route
 Route::get('/test', function () {
@@ -232,6 +236,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
+    //Get exercises for a lesson
     Route::get('/lessons/{lesson}/exercise', function($lessonId) {
         try {
             $lessonExercise = LessonExercise::where('lesson_id', $lessonId)
@@ -281,6 +286,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
+    //Submit lesson exercise results
     Route::post('/exercise/submit', function(Request $request) {
         try {
             $request->validate([
@@ -337,6 +343,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
+    //Get student's average score
     Route::get('/students/average-score', function(Request $request) {
         try {
             $request->validate([
@@ -354,18 +361,28 @@ Route::middleware('auth:sanctum')->group(function () {
                 ], 404);
             }
 
-            $highestScore = DB::table('submissions')
-                    ->selectRaw('lesson_exercise_id, MAX(score) as max_score')
-                    ->where('student_id', $student->id)
-                    ->groupBy('lesson_exercise_id')
-                    ->get();
-            
-            $averageScore = $highestScore->avg('max_score') ?? 0;
+            $averageScore = DB::table('submissions')
+                ->where('student_id', $student->id)
+                ->select(DB::raw('
+                    AVG(
+                        CASE
+                            WHEN lesson_exercise_id IS NOT NULL
+                            THEN (
+                                SELECT MAX(score)
+                                FROM submissions s2
+                                WHERE s2.student_id = submissions.student_id
+                                AND s2.lesson_exercise_id = submissions.lesson_exercise_id
+                            )
+                            ELSE  score
+                        END
+                    ) as average_score
+                    '))
+                ->value('average_score') ?? 0;
 
             return response()->json([
                 'data' => [
                     'student_id' => $student->id,
-                    'average_score' => $averageScore
+                    'average_score' => round($averageScore, 2)
                 ],
                 'message' => 'Average score calculated successfully',
                 'success' => true,
@@ -389,6 +406,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
+    //Get topic progress for a student
     Route::get('/topics/{topic}/progress', function(Request $request, Topic $topic) {
         try {
             $request->validate([
@@ -444,6 +462,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
+    //Get overall student progress
     Route::get('/students/progress', function(Request $request) {
         try {
             $request->validate([
@@ -493,6 +512,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
+    //Get topics progress for a student
     Route::get('/students/topics-progress', function(Request $request){
         try {
             $request->validate([
@@ -510,27 +530,29 @@ Route::middleware('auth:sanctum')->group(function () {
                 ], 404);
             }
 
-            $topics = Topic::where('is_active', true)->get();
-            $progressData = [];
+            $topics = Topic::where('is_active', true)->withCount(['lessons' => function($q) {
+                $q->where('is_active', true);
+            }])->get();
 
-            foreach ($topics as $topic) {
-                $totalLessons = $topic->lessons()->where('is_active', true)->count();
-                $completedLessons = StudentLessonProgress::where('student_id', $student->id)
-                    ->whereHas('lesson', function($q) use ($topic) {
-                        $q->where('topic_id', $topic->id);
-                    })
-                    ->count();
-                
-                $progress = $totalLessons > 0 ? ($completedLessons / $totalLessons) * 100 : 0;
+            $completedLessons = StudentLessonProgress::where('student_id', $student->id)
+            ->join('lessons', 'student_lesson_progress.lesson_id', '=', 'lessons.id')
+            ->select('lessons.topic_id', DB::raw('count(*) as completed_count'))
+            ->groupBy('lessons.topic_id')
+            ->pluck('completed_count', 'topic_id');
 
-                $progressData[] = [
+            $progressData = $topics->map(function($topic) use ($completedLessons) {
+                $completed = $completedLessons[$topic->id] ?? 0;
+                $progress = $completedLessons[$topic->id] ?? 0;
+                $progress = $topic->lessons_count > 0 ? ($completed / $topic->lessons_count) * 100 : 0;
+
+                return [
                     'topic_id' => $topic->id,
-                    'topic_title' => $topic->title,
-                    'total_lessons' => $totalLessons,
-                    'completed_lessons' => $completedLessons,
+                    'topic_title' => $topic->topic_title,
+                    'total_lessons' => $topic->lessons_count,
+                    'completed_lessons' => $completed,
                     'progress_percentage' => round($progress, 2)
                 ];
-            }
+            })->values()->all();
 
             return response()->json([
                 'data' => $progressData,
@@ -549,6 +571,313 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json([
                 'data' => null,
                 'message' => 'Failed to retrieve topics progress',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    // Chapter Exercises CRUD and Retrieval
+    Route::post('/chapter-exercises', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user_id)->first();
+
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can create chapter exercises'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'topic_id' => 'required|exists:topics,id',
+                'is_active' => 'boolean',
+                'activated_at' => 'nullable|date',
+            ]);
+
+            $chapterExercise = ChapterExercise::create([
+                'topic_id' => $request->topic_id,
+                'is_active' => $request->is_active ?? false,
+                'created_by' => $admin->id,
+                'activated_at' => $request->activated_at,
+            ]);
+
+            return response()->json([
+                'data' => $chapterExercise,
+                'message' => 'Chapter exercise created successfully',
+                'success' => true,
+                'remark' => 'New chapter exercise record created'
+            ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to create chapter exercise',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/topics/{topic}/chapter-exercises', function(Topic $topic) {
+        try {
+            $student = Student::where('user_id', request()->user()->id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $exercises = ChapterExercise::where('topic_id', $topic->id)
+                ->where('is_active', true)
+                ->leftJoin('student_chapter_exercise_progress', function ($join) use ($student) {
+                    $join->on('chapter_exercises.id', '=', 'student_chapter_exercise_progress.chapter_exercise_id')
+                        ->where('student_chapter_exercise_progress.student_id', '=', $student->id);
+                })
+                ->select('chapter_exercises.*', 
+                        'student_chapter_exercise_progress.is_completed',
+                        'student_chapter_exercise_progress.score',
+                        'student_chapter_exercise_progress.completed_at')
+                ->orderBy('chapter_exercises.id') 
+                ->get();
+
+            return response()->json([
+                'data' => $exercises,
+                'message' => 'Chapter exercises retrieved successfully',
+                'success' => true,
+                'remark' => 'All active chapter exercises for the topic, with student progress data'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve chapter exercises',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/chapter-exercises/{chapterExercise}', function(ChapterExercise $chapterExercise) {
+        try {
+            $questions = $chapterExercise->questions()->where('is_active', true)->orderBy('order_index')->get();
+
+            $multipleChoiceQuestions = $questions->map(function ($question) {
+                return $question->multipleChoice;
+            })->filter();
+
+            $sqlQuestions = $questions->map(function ($question) {
+                return $question->interactiveSqlQuestion;
+            })->filter();
+
+            return response()->json([
+                'data' => [
+                    'chapterExercise' => $chapterExercise,
+                    'questions' => [
+                        'multipleChoice' => $multipleChoiceQuestions,
+                        'sqlQuestions' => $sqlQuestions
+                    ]
+                ],
+                'message' => 'Chapter exercise retrieved successfully',
+                'success' => true,
+                'remark' => 'Single chapter exercise details'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve chapter exercise',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::put('/chapter-exercises/{chapterExercise}', function(Request $request, ChapterExercise $chapterExercise) {
+        $admin = Admin::where('user_id', $request->user_id)->first();
+
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can update chapter exercises'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'topic_id' => 'nullable|exists:topics,id',
+                'is_active' => 'boolean',
+                'activated_at' => 'nullable|date',
+            ]);
+
+            $chapterExercise->update($request->only(['topic_id', 'is_active', 'activated_at']));
+
+            return response()->json([
+                'data' => $chapterExercise,
+                'message' => 'Chapter exercise updated successfully',
+                'success' => true,
+                'remark' => 'Chapter exercise record updated'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to update chapter exercise',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::delete('/chapter-exercises/{chapterExercise}', function(Request $request, ChapterExercise $chapterExercise) {
+        $admin = Admin::where('user_id', $request->user_id)->first();
+
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can delete chapter exercises'
+            ], 403);
+        }
+
+        try {
+            $chapterExercise->delete();
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Chapter exercise deleted successfully',
+                'success' => true,
+                'remark' => 'Chapter exercise record deleted'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete chapter exercise',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Submit chapter exercise results
+    Route::post('/chapter-exercise/submit', function(Request $request) {
+        try {
+            $request->validate([
+                'chapter_exercise_id' => 'required|exists:chapter_exercises,id',
+                'score' => 'required|numeric|min:0',
+                'user_id' => 'required|exists:users,id'
+            ]) ;
+
+            $student = Student::where('user_id', $request->user_id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found for the given user ID',
+                    'success' => false,
+                    'remark' => 'The user does not have a corresponding student record'
+                ], 404);
+            }
+
+            $submission = Submission::create([
+                'student_id' => $student->id,
+                'chapter_exercise_id' => $request->chapter_exercise_id,
+                'score' => $request->score,
+            ]);
+
+            StudentChapterExerciseProgress::updateOrCreate(
+                [
+                    'student_id' => $student->id,
+                    'chapter_exercise_id' => $request->chapter_exercise_id
+                ],
+                [
+                    'is_completed' => true,
+                    'score' => $request->score,
+                    'completed_at' => now(),
+                ]
+            );
+
+            return response()->json([
+                'data' => $submission,
+                'message' => 'Chapter exercise submitted successfully',
+                'success' => true,
+                'remark' => 'Submission record created'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to submit chapter exercise result',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Get chapter exercise history
+    Route::get('/students/chapter-exercise-history', function(Request $request) {
+        try {
+            $student = Student::where('user_id', request()->user()->id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            // Retrieve chapter exercise progress with related chapter exercise details
+            $history = StudentChapterExerciseProgress::where('student_id', $student->id)
+                ->with('chapterExercise')  // Eager load chapter exercise
+                ->orderBy('completed_at', 'desc')  // Order by completion date, most recent first
+                ->get()
+                ->map(function ($progress) {
+                    return [
+                        'chapter_exercise_id' => $progress->chapter_exercise_id,
+                        'chapter_exercise_title' => $progress->chapterExercise->description ?? 'No title', 
+                        'is_completed' => $progress->is_completed,
+                        'score' => $progress->score,
+                        'completed_at' => $progress->completed_at,
+                    ];
+                });
+
+            return response()->json([
+                'data' => $history,
+                'message' => 'Chapter exercise history retrieved successfully',
+                'success' => true,
+                'remark' => 'All chapter exercise progress records for the student'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve chapter exercise history',
                 'success' => false,
                 'remark' => $e->getMessage()
             ], 500);

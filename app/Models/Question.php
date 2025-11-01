@@ -22,4 +22,9 @@ class Question extends Model
     {
         return $this->hasOne(InteractiveSqlQuestion::class, 'question_id');
     }
+
+    public function chapterExercise()
+    {
+        return $this->belongsTo(ChapterExercise::class);
+    }
 }

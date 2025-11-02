@@ -17,6 +17,7 @@ use App\Models\Admin;
 use App\Models\ChapterExercise;
 use App\Models\StudentChapterExerciseProgress;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Storage;
 
 // Test route
 Route::get('/test', function () {
@@ -878,6 +879,48 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json([
                 'data' => null,
                 'message' => 'Failed to retrieve chapter exercise history',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::post('/user/avatar', function(Request $request) {
+        try {
+            $request->validate([
+                'avatar' => 'required|image', // max 2MB
+            ]);
+
+            $user = $request->user();
+            $fileName = $user->id . '_avatar_'. '.' . $request->file('avatar')->getClientOriginalExtension();
+
+            if ($user->image_url) {
+                Storage::disk('google')->delete("/user_picture/".$fileName);
+            }
+
+            Storage::disk('google')->putFileAs('/user_picture', $request->file('avatar'), $fileName);
+    
+            $filePath = Storage::disk('google')->url("/user_picture/".$fileName);
+
+            $user->update(['image_url' => $filePath]);
+
+            return response()->json([
+                'data' => ['avatar_url' => $filePath],
+                'message' => 'Avatar updated successfully',
+                'success' => true,
+                'remark' => 'User avatar stored on Google Drive and URL updated'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to upload avatar',
                 'success' => false,
                 'remark' => $e->getMessage()
             ], 500);

@@ -18,6 +18,11 @@ use App\Models\ChapterExercise;
 use App\Models\StudentChapterExerciseProgress;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
+use App\Models\Teacher;
+use App\Models\MultipleChoiceQuestion;
+use App\Models\Question;
+use App\Models\InteractiveSqlQuestion;
 
 // Test route
 Route::get('/test', function () {
@@ -642,7 +647,6 @@ Route::middleware('auth:sanctum')->group(function () {
             }
 
             $exercises = ChapterExercise::where('topic_id', $topic->id)
-                ->where('is_active', true)
                 ->leftJoin('student_chapter_exercise_progress', function ($join) use ($student) {
                     $join->on('chapter_exercises.id', '=', 'student_chapter_exercise_progress.chapter_exercise_id')
                         ->where('student_chapter_exercise_progress.student_id', '=', $student->id);
@@ -921,6 +925,132 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json([
                 'data' => null,
                 'message' => 'Failed to upload avatar',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::post('/questions', function(Request $request) {
+        try {
+            $user = $request->user();
+            $teacher = Teacher::where('user_id', $user->id)->first();
+
+            if (!$teacher) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Unauthorized',
+                    'success' => false,
+                    'remark' => 'Only teachers can create exercises and questions'
+                ], 403);
+            }
+
+            DB::beginTransaction();
+
+            // Validate the base request
+            $request->validate([
+                'exercise_type' => 'required|in:lesson,chapter',
+                'parent_id' => 'required|integer', // lesson_id or topic_id
+                'questions' => 'required|array|min:1',
+                'questions.*.type' => 'required|in:multiple_choice,sql',
+                'questions.*.order_index' => 'required|integer',
+                'questions.*.title' => 'required|string|max:255',
+                // Question type specific validations
+                'questions.*.details' => 'required|array',
+                'questions.*.details.description' => 'required_if:questions.*.type,multiple_choice|string',
+                'questions.*.details.answer_A' => 'required_if:questions.*.type,multiple_choice|string',
+                'questions.*.details.answer_B' => 'required_if:questions.*.type,multiple_choice|string',
+                'questions.*.details.answer_C' => 'required_if:questions.*.type,multiple_choice|string',
+                'questions.*.details.answer_D' => 'required_if:questions.*.type,multiple_choice|string',
+                'questions.*.details.correct_answer' => 'required_if:questions.*.type,multiple_choice|in:A,B,C,D',
+                'questions.*.details.interaction_type' => 'required_if:questions.*.type,interactive_sql',
+                'questions.*.details.question_data' => 'required_if:questions.*.type,interactive_sql',
+                'questions.*.details.solution_data' => 'required_if:questions.*.type,interactive_sql'
+            ]);
+
+            // Create exercise first
+            if ($request->exercise_type === 'lesson') {
+                $exercise = LessonExercise::create([
+                    'lesson_id' => $request->parent_id,
+                    'is_active' => true,
+                    'created_by' => $teacher->id
+                ]);
+            } else {
+                $exercise = ChapterExercise::create([
+                    'topic_id' => $request->parent_id,
+                    'is_active' => true,
+                    'created_by' => $teacher->id
+                ]);
+            }
+
+            $createdQuestions = [];
+
+            foreach ($request->questions as $questionData) {
+                // Create base question
+                $question = Question::create([
+                    $request->exercise_type === 'lesson' ? 'lesson_exercise_id' : 'chapter_exercise_id' => $exercise->id,
+                    'question_type' => $questionData['type'],
+                    'order_index' => $questionData['order_index'],
+                    'question_title' => $questionData['title'],
+                    'is_active' => true,
+                    'created_by' => $teacher->id
+                ]);
+
+                // Create specific question type
+                if ($questionData['type'] === 'multiple_choice') {
+                    $details = MultipleChoiceQuestion::create([
+                        'question_id' => $question->id,
+                        'description' => $questionData['details']['description'],
+                        'answer_A' => $questionData['details']['answer_A'],
+                        'answer_B' => $questionData['details']['answer_B'],
+                        'answer_C' => $questionData['details']['answer_C'],
+                        'answer_D' => $questionData['details']['answer_D'],
+                        'correct_answer' => $questionData['details']['correct_answer'],
+                        'is_active' => true
+                    ]);
+
+                    $question->multipleChoice = $details;
+                } else {
+                    $details = InteractiveSqlQuestion::create([
+                        'question_id' => $question->id,
+                        'interaction_type' => $questionData['details']['interaction_type'],
+                        'question_data' => $questionData['details']['question_data'],
+        'solution_data' => $questionData['details']['solution_data'],
+                        'description' => json_encode($questionData['details']['description'] ?? null),
+                        'description' => $questionData['details']['description'],
+                    ]);
+
+                    $question->interactiveSqlQuestion = $details;
+                }
+
+                $createdQuestions[] = $question;
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'data' => [
+                    'exercise' => $exercise,
+                    'questions' => $createdQuestions
+                ],
+                'message' => 'Exercise and questions created successfully',
+                'success' => true,
+                'remark' => 'New exercise created with ' . count($createdQuestions) . ' questions'
+            ], 201);
+
+        } catch (ValidationException $e) {
+            DB::rollBack();
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to create exercise and questions',
                 'success' => false,
                 'remark' => $e->getMessage()
             ], 500);

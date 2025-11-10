@@ -16,13 +16,16 @@ use App\Models\StudentLessonProgress;
 use App\Models\Admin;
 use App\Models\ChapterExercise;
 use App\Models\StudentChapterExerciseProgress;
-use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use App\Models\Teacher;
+use App\Models\Exam;
+use App\Models\ExamAuditLog;
 use App\Models\MultipleChoiceQuestion;
 use App\Models\Question;
 use App\Models\InteractiveSqlQuestion;
+use App\Models\StudentExamProgress;
 
 // Test route
 Route::get('/test', function () {
@@ -367,23 +370,17 @@ Route::middleware('auth:sanctum')->group(function () {
                 ], 404);
             }
 
-            $averageScore = DB::table('submissions')
-                ->where('student_id', $student->id)
-                ->select(DB::raw('
-                    AVG(
-                        CASE
-                            WHEN lesson_exercise_id IS NOT NULL
-                            THEN (
-                                SELECT MAX(score)
-                                FROM submissions s2
-                                WHERE s2.student_id = submissions.student_id
-                                AND s2.lesson_exercise_id = submissions.lesson_exercise_id
-                            )
-                            ELSE  score
-                        END
-                    ) as average_score
-                    '))
-                ->value('average_score') ?? 0;
+            $averageScore = DB::select('
+            SELECT AVG(max_score) as average_score FROM (
+                SELECT MAX(score) as max_score FROM submissions 
+                WHERE student_id = ? AND lesson_exercise_id IS NOT NULL 
+                GROUP BY lesson_exercise_id
+                UNION ALL
+                SELECT MAX(score) as max_score FROM submissions 
+                WHERE student_id = ? AND chapter_exercise_id IS NOT NULL 
+                GROUP BY chapter_exercise_id
+            ) as max_scores
+            ', [$student->id, $student->id])[0]->average_score ?? 0;
 
             return response()->json([
                 'data' => [
@@ -652,7 +649,6 @@ Route::middleware('auth:sanctum')->group(function () {
                         ->where('student_chapter_exercise_progress.student_id', '=', $student->id);
                 })
                 ->select('chapter_exercises.*', 
-                        'student_chapter_exercise_progress.is_completed',
                         'student_chapter_exercise_progress.score',
                         'student_chapter_exercise_progress.completed_at')
                 ->orderBy('chapter_exercises.id') 
@@ -815,7 +811,6 @@ Route::middleware('auth:sanctum')->group(function () {
                     'chapter_exercise_id' => $request->chapter_exercise_id
                 ],
                 [
-                    'is_completed' => true,
                     'score' => $request->score,
                     'completed_at' => now(),
                 ]
@@ -867,7 +862,6 @@ Route::middleware('auth:sanctum')->group(function () {
                     return [
                         'chapter_exercise_id' => $progress->chapter_exercise_id,
                         'chapter_exercise_title' => $progress->chapterExercise->description ?? 'No title', 
-                        'is_completed' => $progress->is_completed,
                         'score' => $progress->score,
                         'completed_at' => $progress->completed_at,
                     ];
@@ -949,8 +943,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
             // Validate the base request
             $request->validate([
-                'exercise_type' => 'required|in:lesson,chapter',
-                'parent_id' => 'required|integer', // lesson_id or topic_id
+                'exercise_type' => 'required|in:lesson,chapter,exam',
+                'parent_id' => 'nullable|integer', // lesson_id or topic_id,
+                'exam_title' => 'nullable|string|max:255',
+                'exam_description' => 'nullable|string',
+                'exam_duration_minutes' => 'nullable|integer|min:1',
+                'exam_start_time' => 'nullable|date',
+                'exam_end_time' => 'nullable|date',
                 'questions' => 'required|array|min:1',
                 'questions.*.type' => 'required|in:multiple_choice,sql',
                 'questions.*.order_index' => 'required|integer',
@@ -975,10 +974,21 @@ Route::middleware('auth:sanctum')->group(function () {
                     'is_active' => true,
                     'created_by' => $teacher->id
                 ]);
-            } else {
+            } elseif ($request->exercise_type === 'chapter') {
                 $exercise = ChapterExercise::create([
                     'topic_id' => $request->parent_id,
                     'is_active' => true,
+                    'created_by' => $teacher->id
+                ]);
+            } else {  // exam
+                $exercise = Exam::create([
+                    'topic_id' => $request->parent_id,  // Nullable
+                    'title' => $request->exam_title ?? 'Untitled Exam',
+                    'description' => $request->exam_description,
+                    'duration_minutes' => $request->exam_duration_minutes ?? 60,
+                    'start_time' => $request->exam_start_time ?? now()->addMinutes(10),  // Default to 10 minutes from now
+                    'end_time' => $request->exam_end_time ?? now()->addHours(2),  // Default to 2 hours later
+                    'is_active' => false,  // Exams start inactive by default
                     'created_by' => $teacher->id
                 ]);
             }
@@ -988,7 +998,8 @@ Route::middleware('auth:sanctum')->group(function () {
             foreach ($request->questions as $questionData) {
                 // Create base question
                 $question = Question::create([
-                    $request->exercise_type === 'lesson' ? 'lesson_exercise_id' : 'chapter_exercise_id' => $exercise->id,
+                    $request->exercise_type === 'lesson' ? 'lesson_exercise_id' :
+                    ($request->exercise_type === 'chapter' ? 'chapter_exercise_id' : 'exam_id') => $exercise->id,
                     'question_type' => $questionData['type'],
                     'order_index' => $questionData['order_index'],
                     'question_title' => $questionData['title'],
@@ -1051,6 +1062,589 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json([
                 'data' => null,
                 'message' => 'Failed to create exercise and questions',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    // Exams CRUD and Retrieval
+    Route::get('/topics/{topic}/exams', function(Topic $topic) {
+        try {
+            $student = Student::where('user_id', request()->user()->id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $exams = Exam::where('topic_id', $topic->id)
+                ->where('is_active', true)
+                ->leftJoin('student_exam_progress', function ($join) use ($student) {
+                    $join->on('exams.id', '=', 'student_exam_progress.exam_id')
+                        ->where('student_exam_progress.student_id', '=', $student->id);
+                })
+                ->select('exams.*',
+                        'student_exam_progress.is_completed',
+                        'student_exam_progress.score',
+                        'student_exam_progress.completed_at')
+                ->orderBy('exams.start_time')
+                ->get();
+
+            return response()->json([
+                'data' => $exams,
+                'message' => 'Exams retrieved successfully',
+                'success' => true,
+                'remark' => 'All exams for the topic'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve exams',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/exams/{exam}', function(Exam $exam) {
+        try {
+            $student = Student::where('user_id', request()->user()->id)->first();
+
+            if(!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $now = now();
+            if(!$exam->is_active || $now->lt($exam->start_time) || $now->gt($exam->end_time)) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Exam is not currently active',
+                    'success' => false,
+                    'remark' => 'The current time is outside the exam schedule'
+                ], 403);
+            }
+
+            $progress = StudentExamProgress::where('student_id', $student->id)
+                ->where('exam_id', $exam->id)
+                ->first();
+
+            if($progress && $progress->is_completed) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Exam already completed',
+                    'success' => false,
+                    'remark' => 'The student has already completed this exam'
+                ], 403);
+            }
+
+            $questions = $exam->questions()->where('is_active', true)->orderBy('order_index')->get();
+
+            $multipleChoiceQuestions = $questions->map(function ($question) {
+                return $question->multipleChoice;
+            })->filter();
+
+            $sqlQuestions = $questions->map(function ($question) {
+                return $question->interactiveSqlQuestion;
+            })->filter();
+
+            return response()->json([
+                'data' => [
+                    'exam' => $exam,
+                    'questions' => [
+                        'multipleChoice' => $multipleChoiceQuestions,
+                        'sqlQuestions' => $sqlQuestions
+                    ]
+                ],
+                'message' => 'Exam retrieved successfully',
+                'success' => true,
+                'remark' => 'Single exam details'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve exam',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/exams', function() {
+        try {
+            $student = Student::where('user_id', request()->user()->id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $exams = Exam::where('start_time', '>', now())  // Only future exams
+                ->orderBy('start_time')
+                ->get()
+                ->map(function ($exam) {
+                    // Set progress fields to null for future exams (for consistency)
+                    return [
+                        'id' => $exam->id,
+                        'topic_id' => $exam->topic_id,
+                        'title' => $exam->title,
+                        'description' => $exam->description,
+                        'duration_minutes' => $exam->duration_minutes,
+                        'start_time' => $exam->start_time,
+                        'end_time' => $exam->end_time,
+                        'is_active' => $exam->is_active,
+                        'created_by' => $exam->created_by,
+                        'created_at' => $exam->created_at,
+                        'updated_at' => $exam->updated_at,
+                        'is_completed' => null,  // Not applicable for future exams
+                        'score' => null,         // Not applicable for future exams
+                        'submitted_at' => null,  // Not applicable for future exams
+                    ];
+                });
+
+            return response()->json([
+                'data' => $exams,
+                'message' => 'Future exams retrieved successfully',
+                'success' => true,
+                'remark' => 'All active exams scheduled for the future'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve exams',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::put('/exams/{exam}', function(Request $request, Exam $exam) {
+        $teacher = Teacher::where('user_id', $request->user()->id)->first();
+        if(!$teacher) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only teachers can update exams'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'title' => 'nullable|string|max:255',
+                'description' => 'nullable|string',
+                'duration_minutes' => 'nullable|integer|min:1',
+                'start_time' => 'nullable|date:after:now',
+                'end_time' => 'nullable|date:after:start_time',
+                'is_active' => 'boolean',
+            ]);
+
+            $exam->update($request->only(['title', 'description', 'duration_minutes', 'start_time', 'end_time', 'is_active']));
+
+            return response()->json([
+                'data' => $exam,
+                'message' => 'Exam updated successfully',
+                'success' => true,
+                'remark' => 'Exam record updated'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to update exam',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::delete('/exams/{exam}', function(Request $request, Exam $exam) {
+        $teacher = Teacher::where('user_id', $request->user()->id)->first();
+        if(!$teacher) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only teachers can delete exams'
+            ], 403);
+        }
+
+        try {
+            $exam->delete();
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Exam deleted successfully',
+                'success' => true,
+                'remark' => 'Exam record deleted'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete exam',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Student submit exams
+    Route::post('/exams/submit', function(Request $request) {
+        try {
+            $request->validate([
+                'exam_id' => 'required|exists:exams,id',
+                'score' => 'required|numeric|min:0',
+                'session_token' => 'required|string',
+                'device_fingerprint' => 'required|string',
+            ]) ;
+
+            $student = Student::where('user_id', $request->user()->id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found for the given user ID',
+                    'success' => false,
+                    'remark' => 'The user does not have a corresponding student record'
+                ], 404);
+            }
+
+            $progress = StudentExamProgress::where('student_id', $student->id)
+                ->where('exam_id', $request->exam_id)
+                ->where('session_token', $request->session_token)
+                ->where('device_fingerprint', $request->device_fingerprint)
+                ->first();
+
+            if (!$progress || $progress->is_completed) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Invalid submission',
+                    'success' => false,
+                    'remark' => 'Session invalid, exam completed, or device mismatch'
+                ], 403);
+            }
+
+            $violationCount = ExamAuditLog::where('session_token')
+                ->count();
+
+            if($violationCount > 0) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Exam violations detected',
+                    'success' => false,
+                    'remark' => 'Cannot submit exam due to recorded violations'
+                ], 403);
+            }
+
+            DB::beginTransaction();
+
+            $submission = Submission::create([
+                'student_id' => $student->id,
+                'exam_id' => $request->exam_id,
+                'score' => $request->score,
+            ]);
+
+            $progress->update([
+                'is_completed' => true,
+                'score' => $request->score,
+                'completed_at' => now(),
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'data' => $submission,
+                'message' => 'Exam submitted successfully',
+                'success' => true,
+                'remark' => 'Submission record created'
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to submit exam result',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::get('/students/exam-history', function(Request $request) {
+        try {
+            $student = Student::where('user_id', request()->user()->id)->first();
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $history = StudentExamProgress::where('student_id', $student->id)
+                ->with('exam')  // Eager load exam
+                ->orderBy('submitted_at', 'desc')
+                ->get()
+                ->map(function ($progress) {
+                    return [
+                        'exam_id' => $progress->exam_id,
+                        'exam_title' => $progress->exam->title ?? 'No title', 
+                        'is_completed' => $progress->is_completed,
+                        'score' => $progress->score,
+                        'submitted_at' => $progress->submitted_at,
+                    ];
+                });
+
+            return response()->json([
+                'data' => $history,
+                'message' => 'Exam history retrieved successfully',
+                'success' => true,
+                'remark' => 'All exam progress records for the student'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve exam history',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Teacher start exam
+    Route::put('/exams/{exam}/start', function(Request $request, Exam $exam) {
+        $teacher = Teacher::where('user_id', $request->user()->id)->first();
+        if(!$teacher) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only teachers can start exams'
+            ], 403);
+        }
+
+        try {
+            if ($exam->is_active) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Exam is already active',
+                    'success' => false,
+                    'remark' => 'The exam has already been started'
+                ], 400);
+            }
+
+            $exam->update(['is_active' => true]);
+
+            return response()->json([
+                'data' => $exam,
+                'message' => 'Exam started successfully',
+                'success' => true,
+                'remark' => 'Exam is now active'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to start exam',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Student starts exam
+    Route::post('/exams/start', function(Request $request) {
+        try {
+            $request->validate([
+                'exam_id' => 'required|exists:exams,id',
+                'device_fingerprint' => 'required|string'
+            ]);
+
+            $student = Student::where('user_id', $request->user()->id)->first();
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $exam = Exam::find($request->exam_id);
+
+            $now = now();
+            $isActive = $exam->is_active || ($exam->start_time <= $now && $now <= $exam->end_time);
+            if (!$isActive) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Exam is not currently active',
+                    'success' => false,
+                    'remark' => 'The current time is outside the exam schedule'
+                ], 403);
+            }
+
+            // Check for ANY existing progress (completed or not) to prevent duplicates
+            $existingProgress = StudentExamProgress::where('student_id', $student->id)
+                ->where('exam_id', $exam->id)
+                ->first();
+            if ($existingProgress) {
+                if ($existingProgress->is_completed) {
+                    return response()->json([
+                        'data' => null,
+                        'message' => 'Exam already completed',
+                        'success' => false,
+                        'remark' => 'The student has already completed this exam'
+                    ], 403);
+                } else {
+                    return response()->json([
+                        'data' => null,
+                        'message' => 'Exam already started',
+                        'success' => false,
+                        'remark' => 'The student has already started this exam'
+                    ], 403);
+                }
+            }
+
+            $sessionToken = Str::random(32);
+
+            $progress = StudentExamProgress::create([
+                'student_id' => $student->id,
+                'exam_id' => $exam->id,
+                'is_completed' => false,
+                'session_token' => $sessionToken,
+                'device_fingerprint' => $request->device_fingerprint,
+                'started_at' => $now,
+            ]);
+
+            $questions = $exam->questions()->where('is_active', true)->orderBy('order_index')->get();
+
+            $multipleChoiceQuestions = $questions->map(function ($question) {
+                return $question->multipleChoice;
+            })->filter();
+
+            $sqlQuestions = $questions->map(function ($question) {
+                return $question->interactiveSqlQuestion;
+            })->filter();
+
+            return response()->json([
+                'data' => [
+                    'session_token' => $sessionToken,
+                    'exam' => [
+                        'id' => $exam->id,
+                        'title' => $exam->title,
+                        'duration_minutes' => $exam->duration_minutes,
+                        'start_time' => $exam->start_time,
+                        'end_time' => $exam->end_time,
+                    ],
+                    'questions' => [
+                        'multipleChoice' => $multipleChoiceQuestions,
+                        'sqlQuestions' => $sqlQuestions
+                    ]
+                ],
+                'message' => 'Exam started successfully',
+                'success' => true,
+                'remark' => 'Exam session initialized for the student'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to start exam',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Audit log during exam
+    Route::post('/audit-logs', function(Request $request) {
+        try {
+            $request->validate([
+                'session_token' => 'required|string|exists:student_exam_progress,session_token',
+                'details' => 'nullable|array',
+                'event_type' => 'nullable|in:app_minimized,app_resumed,screen_capture_detected,tab_switch',
+            ]);
+
+            $student = Student::where('user_id', $request->user()->id)->first();
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $progress = StudentExamProgress::where('session_token', $request->session_token)
+                ->where('student_id', $student->id)
+                ->first();
+            if (!$progress) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Invalid session token',
+                    'success' => false,
+                    'remark' => 'No exam progress found for the given session token'
+                ], 404);
+            }
+
+            ExamAuditLog::create([
+                'session_token' => $request->session_token,
+                'student_id' => $progress->student_id,
+                'exam_id' => $progress->exam_id,
+                'event_type' => $request->event_type,
+                'details' => $request->details,
+                'logged_at' => now(),
+            ]);
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Audit log recorded successfully',
+                'success' => true,
+                'remark' => 'Exam audit log entry created'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to record audit log',
                 'success' => false,
                 'remark' => $e->getMessage()
             ], 500);

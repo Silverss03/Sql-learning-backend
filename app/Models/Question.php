@@ -6,7 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 
 class Question extends Model
 {
-    protected $fillable = ['lesson_exercise_id', 'question_type' , 'order_index', 'is_active', 'created_by', 'question_title', 'chapter_exercise_id'];
+    protected $fillable = [
+        'lesson_exercise_id', 'question_type',
+        'order_index',
+        'is_active',
+        'created_by',
+        'question_title','chapter_exercise_id',
+        'exam_id'
+    ];
 
     public function lesson()
     {
@@ -26,5 +33,10 @@ class Question extends Model
     public function chapterExercise()
     {
         return $this->belongsTo(ChapterExercise::class);
+    }
+
+    public function exam()
+    {
+        return $this->belongsTo(Exam::class);
     }
 }

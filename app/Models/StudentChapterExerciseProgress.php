@@ -9,9 +9,12 @@ class StudentChapterExerciseProgress extends Model
     protected $fillable = [
         'student_id',
         'chapter_exercise_id',
-        'is_completed',
         'score',
         'completed_at',
+    ];
+
+    protected $casts = [
+        'completed_at' => 'datetime',
     ];
 
     public function student()

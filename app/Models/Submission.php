@@ -12,6 +12,7 @@ class Submission extends Model
         'question_id', 
         'score',
         'chapter_exercise_id',
+        'exam_id',
     ];
 
     public function student()
@@ -27,5 +28,10 @@ class Submission extends Model
     public function chapterExercise()
     {
         return $this->belongsTo(ChapterExercise::class);
+    }
+
+    public function exam()
+    {
+        return $this->belongsTo(Exam::class);
     }
 }

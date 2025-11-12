@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use App\Models\StudentLessonProgress;
 use App\Models\Admin;
 use App\Models\ChapterExercise;
+use App\Models\ClassModel;
 use App\Models\StudentChapterExerciseProgress;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
@@ -26,6 +27,9 @@ use App\Models\MultipleChoiceQuestion;
 use App\Models\Question;
 use App\Models\InteractiveSqlQuestion;
 use App\Models\StudentExamProgress;
+use \Illuminate\Support\Facades\Validator;
+use App\Models\ClassEnrollment;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 
 // Test route
 Route::get('/test', function () {
@@ -1645,6 +1649,637 @@ Route::middleware('auth:sanctum')->group(function () {
             return response()->json([
                 'data' => null,
                 'message' => 'Failed to record audit log',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Add a teacher 
+    Route::post('/admin/teachers', function(Request $request){
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can add teachers'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'email' => 'required|email|unique:users,email',
+                'password' => 'required|string|min:8',
+                'name' => 'required|string|max:255',
+            ]);
+
+            DB::beginTransaction();
+
+            $user = User::create([
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'name' => $request->name,
+                'role' => 'teacher',
+                'is_active' => true,
+            ]);
+
+            $teacher = Teacher::create([
+                'user_id' => $user->id
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'data' => $teacher,
+                'message' => 'Teacher added successfully',
+                'success' => true,
+                'remark' => 'New teacher user and record created'
+            ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to add teacher',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Add teachers
+    Route::post('/admin/teachers/batch', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can add teachers'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'xlsx_file' => 'required|file|mimes:xlsx,csv,txt|max:2048',
+            ]);
+
+            $file = $request->file('xlsx_file');
+            $spreadsheet = IOFactory::load($file->getRealPath()); // Assume first row is header: email,password,name
+            $sheet = $spreadsheet->getActiveSheet();
+            $rows = $sheet->toArray();
+
+            $header = array_shift($rows); // Extract header row
+            $errors = [];
+            $created = [];
+
+            DB::beginTransaction();
+
+            foreach ($rows as $row) {
+                $data = array_combine($header, $row); 
+                $validator = Validator::make($data, [
+                    'email' => 'required|email|unique:users,email',
+                    'password' => 'required|string|min:8',
+                    'name' => 'required|string|max:255',
+                ]);
+
+                if ($validator->fails()) {
+                    $errors[] = [
+                        'row' => $data,
+                        'errors' => $validator->errors()
+                    ];
+                    continue;
+                }
+
+                $user = User::create([
+                    'email' => $data['email'],
+                    'password' => Hash::make($data['password']),
+                    'name' => $data['name'],
+                    'role' => 'teacher',
+                    'is_active' => true,
+                ]);
+
+                $teacher = Teacher::create([
+                    'user_id' => $user->id
+                ]);
+
+                $created[] = $teacher;
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'data' => ['created' => $created, 'errors' => $errors],
+                'message' => 'Bulk teachers added',
+                'success' => true,
+                'remark' => count($created) . ' teachers created, ' . count($errors) . ' errors'
+            ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to add teachers',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Add a class
+    Route::post('/admin/classes', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can add classes'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'class_name' => 'required|string|max:255|unique:classes,class_name',
+                'class_code' => 'nullable|string|max:50|unique:classes,class_code',
+                'teacher_email' => 'nullable|email|exists:users,email',
+                'semester' => 'required|string|max:50',
+                'max_students' => 'nullable|integer|min:1',
+                'academic_year' => 'required|string|max:20',
+            ]);
+
+            $teacher = Teacher::whereHas('user', fn($query) => 
+                $query->where('email', $request->teacher_email)
+            )->first();
+
+            if (!$teacher) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Teacher not found',
+                    'success' => false,
+                    'remark' => 'No teacher record for the given email'
+                ], 404);
+            }
+
+            $class = ClassModel::create([
+                'class_name' => $request->class_name,
+                'class_code' => $request->class_code,
+                'teacher_id' => $teacher->id,
+                'semester' => $request->semester,
+                'max_students' => $request->max_students ?? 35,
+                'academic_year' => $request->academic_year,
+                'is_active' => true,
+                'created_by' => $admin->id
+            ]);
+
+            return response()->json([
+                'data' => $class,
+                'message' => 'Class added successfully',
+                'success' => true,
+                'remark' => 'New class record created'
+            ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to add class',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::post('/admin/classes/bulk', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can add classes'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'xlsx_file' => 'required|file|mimes:xlsx,csv,txt|max:2048',
+            ]);
+
+            $file = $request->file('xlsx_file');
+            $spreadsheet = IOFactory::load($file->getRealPath()); // class_code,class_name,teacher_email,semester,max_stud
+            $sheet = $spreadsheet->getActiveSheet();
+            $rows = $sheet->toArray();
+            
+            $header = array_shift($rows); // Extract header rowents,academic_year
+            $errors = [];
+            $created = [];
+
+            DB::beginTransaction();
+
+            foreach ($rows as $row) {
+                $data = array_combine($header, $row); 
+                $validator = Validator::make($data, [
+                    'class_code' => 'required|string|unique:classes,class_code',
+                    'class_name' => 'required|string|max:255',
+                    'teacher_email' => 'required|email|exists:users,email',
+                    'semester' => 'required|string',
+                    'max_students' => 'required|integer|min:1',
+                    'academic_year' => 'required|string'
+                ]);
+
+                if ($validator->fails()) {
+                    $errors[] = [
+                        'row' => $data,
+                        'errors' => $validator->errors()
+                    ];
+                    continue;
+                }
+
+                $teacher = Teacher::whereHas('user', fn($query) => 
+                    $query->where('email', $data['teacher_email'])
+                )->first();
+
+                $class = ClassModel::create([
+                    'class_code' => $data['class_code'],
+                    'class_name' => $data['class_name'],
+                    'teacher_id' => $teacher->id,
+                    'semester' => $data['semester'],
+                    'max_students' => $data['max_students'],
+                    'academic_year' => $data['academic_year'],
+                    'is_active' => true,
+                    'created_by' => $admin->id
+                ]);
+
+                $created[] = $teacher;
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'data' => ['created' => $created, 'errors' => $errors],
+                'message' => 'Bulk classes added',
+                'success' => true,
+                'remark' => count($created) . ' classes created, ' . count($errors) . ' errors'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to add classes',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Add student 
+    Route::post('/admin/students', function(Request $request){
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can add students'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'email' => 'required|email|unique:users,email',
+                'password' => 'required|string|min:8',
+                'name' => 'required|string|max:255',
+                'student_code' => 'required|string|unique:students,student_code',
+            ]);
+
+            DB::beginTransaction();
+
+            $user = User::create([
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'name' => $request->name,
+                'role' => 'student',
+                'is_active' => true,
+            ]);
+
+            $student = Student::create([
+                'user_id' => $user->id,
+                'student_code' => $request->student_code,
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'data' => $student,
+                'message' => 'Student added successfully',
+                'success' => true,
+                'remark' => 'New student user and record created'
+            ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to add student',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Add student bulk
+    Route::post('/admin/students/batch', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can add students'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'xlsx_file' => 'required|file|mimes:xlsx,csv,txt|max:2048',
+            ]);
+
+            $file = $request->file('xlsx_file');
+            $spreadsheet = IOFactory::load($file->getRealPath()); // Assume first row is header: email,password,name,stude
+            $sheet = $spreadsheet->getActiveSheet();
+            $rows = $sheet->toArray();
+            
+            $header = array_shift($rows); // Extract header rownt_code
+            $errors = [];
+            $created = [];
+
+            DB::beginTransaction();
+
+            foreach ($rows as $row) {
+                $data = array_combine($header, $row); 
+                $validator = Validator::make($data, [
+                    'email' => 'required|email|unique:users,email',
+                    'password' => 'required|string|min:8',
+                    'name' => 'required|string|max:255',
+                    'student_code' => 'required|string|unique:students,student_code',
+                ]);
+
+                if ($validator->fails()) {
+                    $errors[] = [
+                        'row' => $data,
+                        'errors' => $validator->errors()
+                    ];
+                    continue;
+                }
+
+                $user = User::create([
+                    'email' => $data['email'],
+                    'password' => Hash::make($data['password']),
+                    'name' => $data['name'],
+                    'role' => 'student',
+                    'is_active' => true,
+                ]);
+
+                $student = Student::create([
+                    'user_id' => $user->id,
+                    'student_code' => $data['student_code'],
+                ]);
+
+                $created[] = $student;
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'data' => ['created' => $created, 'errors' => $errors],
+                'message' => 'Bulk students added',
+                'success' => true,
+                'remark' => count($created) . ' students created, ' . count($errors) . ' errors'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to add students',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Add single student to class
+    Route::post('/admin/classes/{class}/students', function(Request $request, ClassModel $class) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can enroll students'
+            ], 403);
+        }
+
+        if(!$class->is_active) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Class is inactive',
+                'success' => false,
+                'remark' => 'Cannot enroll students to an inactive class'
+            ], 400);
+        }
+
+        $currentEnrollments = $class->enrolments()->where('is_active', true)->count();
+
+        if($currentEnrollments >= $class->max_students) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Class is full',
+                'success' => false,
+                'remark' => 'Cannot enroll more students, class capacity reached'
+            ], 400);
+        }
+
+        try {
+            $request->validate([
+                'student_code' => 'required|string|exists:students,student_code'
+            ]);
+
+            $student = Student::where('student_code', $request->student_code)->first();
+
+            $existingEnrollment = ClassEnrollment::where('class_id', $class->id)
+                ->where('student_id', $class->id)
+                ->first();
+
+            if($existingEnrollment) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student already enrolled',
+                    'success' => false,
+                    'remark' => 'The student is already enrolled in this class'
+                ], 400);
+            }
+
+            $enrollment = ClassEnrollment::create([
+                'class_id' => $class->id,
+                'student_id' => $student->id,
+                'enrolled_at' => now(),
+                'is_active' => true,
+            ]);
+
+            return response()->json([
+                'data' => $enrollment,
+                'message' => 'Student enrolled successfully',
+                'success' => true,
+                'remark' => 'Student added to class'
+            ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to enroll student',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //add bulk students to class
+    Route::post('/admin/classes/{class}/students/batch', function(Request $request, ClassModel $class) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if (!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can bulk add students to classes'
+            ], 403);
+        }
+
+        if (!$class->is_active) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Class is inactive',
+                'success' => false,
+                'remark' => 'Cannot add students to an inactive class'
+            ], 400);
+        }
+
+        try {
+            $request->validate([
+                'xlsx_file' => 'required|file|mimes:xlsx,csv,txt|max:2048'
+            ]);
+
+            $file = $request->file('xlsx_file');
+            $spreadsheet = IOFactory::load($file->getRealPath());  // Header: student_code
+            $sheet = $spreadsheet->getActiveSheet();
+            $rows = $sheet->toArray();
+
+            $header = array_shift($rows); // Extract header row
+            $errors = [];
+            $created = [];
+            $currentEnrolments = $class->enrolments()->count();
+
+            DB::beginTransaction();
+
+            foreach ($rows as $row) {
+                if ($currentEnrolments >= $class->max_students) {
+                    $errors[] = ['row' => $row, 'errors' => ['class' => 'Class is full']];
+                    continue;
+                }
+
+                $data = array_combine($header, $row);
+                $validator = Validator::make($data, [
+                    'student_code' => 'required|string|exists:students,student_code'
+                ]);
+
+                if ($validator->fails()) {
+                    $errors[] = ['row' => $data, 'errors' => $validator->errors()];
+                    continue;
+                }
+
+                $student = Student::where('student_code', $data['student_code'])->first();
+
+                $existingEnrolment = ClassEnrollment::where('student_id', $student->id)
+                    ->where('class_id', $class->id)
+                    ->first();
+                if ($existingEnrolment) {
+                    $errors[] = ['row' => $data, 'errors' => ['enrolment' => 'Student already enrolled']];
+                    continue;
+                }
+
+                $enrolment = ClassEnrollment::create([
+                    'student_id' => $student->id,
+                    'class_id' => $class->id,
+                    'enrolled_at' => now(),
+                    'is_active' => true
+                ]);
+                $created[] = $enrolment;
+                $currentEnrolments++;
+            }
+            DB::commit();
+
+            return response()->json([
+                'data' => ['created' => $created, 'errors' => $errors],
+                'message' => 'Bulk students added to class',
+                'success' => true,
+                'remark' => count($created) . ' enrolments created, ' . count($errors) . ' errors'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to bulk add students to class',
                 'success' => false,
                 'remark' => $e->getMessage()
             ], 500);

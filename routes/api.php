@@ -375,16 +375,20 @@ Route::middleware('auth:sanctum')->group(function () {
             }
 
             $averageScore = DB::select('
-            SELECT AVG(max_score) as average_score FROM (
-                SELECT MAX(score) as max_score FROM submissions 
-                WHERE student_id = ? AND lesson_exercise_id IS NOT NULL 
-                GROUP BY lesson_exercise_id
-                UNION ALL
-                SELECT MAX(score) as max_score FROM submissions 
-                WHERE student_id = ? AND chapter_exercise_id IS NOT NULL 
-                GROUP BY chapter_exercise_id
-            ) as max_scores
-            ', [$student->id, $student->id])[0]->average_score ?? 0;
+                SELECT AVG(max_score) as average_score FROM (
+                    SELECT MAX(score) as max_score FROM submissions 
+                    WHERE student_id = ? AND lesson_exercise_id IS NOT NULL 
+                    GROUP BY lesson_exercise_id
+                    UNION ALL
+                    SELECT MAX(score) as max_score FROM submissions 
+                    WHERE student_id = ? AND chapter_exercise_id IS NOT NULL 
+                    GROUP BY chapter_exercise_id
+                    UNION ALL
+                    SELECT MAX(score) as max_score FROM submissions 
+                    WHERE student_id = ? AND exam_id IS NOT NULL 
+                    GROUP BY exam_id
+                ) as max_scores
+                ', [$student->id, $student->id, $student->id])[0]->average_score ?? 0;
 
             return response()->json([
                 'data' => [
@@ -954,6 +958,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 'exam_duration_minutes' => 'nullable|integer|min:1',
                 'exam_start_time' => 'nullable|date',
                 'exam_end_time' => 'nullable|date',
+                'class_id' => 'required_if:exercise_type,exam|exists:classes,id',
                 'questions' => 'required|array|min:1',
                 'questions.*.type' => 'required|in:multiple_choice,sql',
                 'questions.*.order_index' => 'required|integer',
@@ -985,6 +990,17 @@ Route::middleware('auth:sanctum')->group(function () {
                     'created_by' => $teacher->id
                 ]);
             } else {  // exam
+                $class = ClassModel::where('id', $request->class_id)->where('teacher_id', $teacher->id)->first();
+
+                if (!$class) {
+                    return response()->json([
+                        'data' => null,
+                        'message' => 'Unauthorized',
+                        'success' => false,
+                        'remark' => 'You can only create exams for your own classes'
+                    ], 403);
+                }
+
                 $exercise = Exam::create([
                     'topic_id' => $request->parent_id,  // Nullable
                     'title' => $request->exam_title ?? 'Untitled Exam',
@@ -993,7 +1009,8 @@ Route::middleware('auth:sanctum')->group(function () {
                     'start_time' => $request->exam_start_time ?? now()->addMinutes(10),  // Default to 10 minutes from now
                     'end_time' => $request->exam_end_time ?? now()->addHours(2),  // Default to 2 hours later
                     'is_active' => false,  // Exams start inactive by default
-                    'created_by' => $teacher->id
+                    'created_by' => $teacher->id,
+                    'class_id' => $request->class_id
                 ]);
             }
 
@@ -1086,7 +1103,8 @@ Route::middleware('auth:sanctum')->group(function () {
                 ], 404);
             }
 
-            $exams = Exam::where('topic_id', $topic->id)
+            $exams = Exam::where('class_id', $student->class_id)
+                ->where('topic_id', $topic->id)
                 ->where('is_active', true)
                 ->leftJoin('student_exam_progress', function ($join) use ($student) {
                     $join->on('exams.id', '=', 'student_exam_progress.exam_id')
@@ -1126,6 +1144,15 @@ Route::middleware('auth:sanctum')->group(function () {
                     'success' => false,
                     'remark' => 'No student record for the authenticated user'
                 ], 404);
+            }
+
+            if($exam->class_id !== $student->class_id) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Unauthorized',
+                    'success' => false,
+                    'remark' => 'The exam does not belong to the student\'s class'
+                ], 403);
             }
 
             $now = now();
@@ -1196,7 +1223,8 @@ Route::middleware('auth:sanctum')->group(function () {
                 ], 404);
             }
 
-            $exams = Exam::where('start_time', '>', now())  // Only future exams
+            $exams = Exam::where('class_id', $student->class_id)
+                ->where('start_time', '>', now())  // Only future exams
                 ->orderBy('start_time')
                 ->get()
                 ->map(function ($exam) {
@@ -1655,7 +1683,7 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    //Add a teacher 
+    //teacher CRUD 
     Route::post('/admin/teachers', function(Request $request){
         $admin = Admin::where('user_id', $request->user()->id)->first();
         if(!$admin) {
@@ -1670,7 +1698,7 @@ Route::middleware('auth:sanctum')->group(function () {
         try {
             $request->validate([
                 'email' => 'required|email|unique:users,email',
-                'password' => 'required|string|min:8',
+                'password' => 'nullable|string|min:8',
                 'name' => 'required|string|max:255',
             ]);
 
@@ -1678,7 +1706,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
             $user = User::create([
                 'email' => $request->email,
-                'password' => Hash::make($request->password),
+                'password' => $request->password ? Hash::make($request->password) : Hash::make("1"),
                 'name' => $request->name,
                 'role' => 'teacher',
                 'is_active' => true,
@@ -1746,7 +1774,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 $data = array_combine($header, $row); 
                 $validator = Validator::make($data, [
                     'email' => 'required|email|unique:users,email',
-                    'password' => 'required|string|min:8',
+                    'password' => 'nullable|string|min:8',
                     'name' => 'required|string|max:255',
                 ]);
 
@@ -1799,7 +1827,123 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    //Add a class
+    Route::get('/admin/teachers', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can view teachers'
+            ], 403);
+        }
+
+        try {
+            $teachers = Student::with(['user', 'classModel'])->paginate(20);
+
+            return response()->json([
+                'data' => $teachers,
+                'message' => 'Teachers retrieved successfully',
+                'success' => true,
+                'remark' => 'All teacher records with user details'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve teachers',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::delete('/admin/teachers/{teacher}', function(Request $request, Teacher $teacher) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can delete teachers'
+            ], 403);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $teacher->user()->delete();
+            $teacher->delete();
+
+            DB::commit();
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Teacher deleted successfully',
+                'success' => true,
+                'remark' => 'Teacher and associated user record deleted'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete teacher',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::post('/admin/teachers/batch-delete', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can delete teachers'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'teacher_ids' => 'required|array',
+                'teacher_ids.*' => 'exists:teachers,id',
+            ]);
+
+            DB::beginTransaction();
+
+            $teachers = Teacher::whereIn('id', $request->teacher_ids)->get();
+
+            foreach ($teachers as $teacher) {
+                $teacher->user()->delete();
+                $teacher->delete();
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Teachers deleted successfully',
+                'success' => true,
+                'remark' => count($teachers) . ' teachers deleted'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete teachers',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //Class CRUD
     Route::post('/admin/classes', function(Request $request) {
         $admin = Admin::where('user_id', $request->user()->id)->first();
         if(!$admin) {
@@ -1957,7 +2101,109 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    //Add student 
+    Route::get('/admin/classes', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can view classes'
+            ], 403);
+        }
+
+        try {
+            $classes = ClassModel::with('teacher.user')->paginate(20);
+
+            return response()->json([
+                'data' => $classes,
+                'message' => 'Classes retrieved successfully',
+                'success' => true,
+                'remark' => 'All class records with teacher details'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve classes',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::delete('/admin/classes/{classModel}', function(Request $request, ClassModel $classModel) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can delete classes'
+            ], 403);
+        }
+
+        try {
+            $classModel->delete();
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Class deleted successfully',
+                'success' => true,
+                'remark' => 'Class record deleted'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete class',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::post('/admin/classes/batch-delete', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can delete classes'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'class_ids' => 'required|array',
+                'class_ids.*' => 'exists:classes,id',
+            ]);
+
+            ClassModel::whereIn('id', $request->class_ids)->delete();
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Classes deleted successfully',
+                'success' => true,
+                'remark' => count($request->class_ids) . ' class records deleted'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete classes',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //student CRUD
     Route::post('/admin/students', function(Request $request){
         $admin = Admin::where('user_id', $request->user()->id)->first();
         if(!$admin) {
@@ -1971,10 +2217,11 @@ Route::middleware('auth:sanctum')->group(function () {
 
         try {
             $request->validate([
-                'email' => 'required|email|unique:users,email',
+                'email' => 'required|email',
                 'password' => 'required|string|min:8',
                 'name' => 'required|string|max:255',
                 'student_code' => 'required|string|unique:students,student_code',
+                'class_id' => 'required|exists:classes,id',
             ]);
 
             DB::beginTransaction();
@@ -1990,6 +2237,7 @@ Route::middleware('auth:sanctum')->group(function () {
             $student = Student::create([
                 'user_id' => $user->id,
                 'student_code' => $request->student_code,
+                'class_id' => $request->class_id,
             ]);
 
             DB::commit();
@@ -2049,10 +2297,11 @@ Route::middleware('auth:sanctum')->group(function () {
             foreach ($rows as $row) {
                 $data = array_combine($header, $row); 
                 $validator = Validator::make($data, [
-                    'email' => 'required|email|unique:users,email',
+                    'email' => 'required|email',
                     'password' => 'required|string|min:8',
                     'name' => 'required|string|max:255',
                     'student_code' => 'required|string|unique:students,student_code',
+                    'class_id' => 'required|exists:classes,id',
                 ]);
 
                 if ($validator->fails()) {
@@ -2074,6 +2323,7 @@ Route::middleware('auth:sanctum')->group(function () {
                 $student = Student::create([
                     'user_id' => $user->id,
                     'student_code' => $data['student_code'],
+                    'class_id' => $data['class_id'],
                 ]);
 
                 $created[] = $student;
@@ -2105,181 +2355,176 @@ Route::middleware('auth:sanctum')->group(function () {
         }
     });
 
-    //Add single student to class
-    Route::post('/admin/classes/{class}/students', function(Request $request, ClassModel $class) {
+    Route::get('/admin/students', function(Request $request) {
         $admin = Admin::where('user_id', $request->user()->id)->first();
         if(!$admin) {
             return response()->json([
                 'data' => null,
                 'message' => 'Unauthorized',
                 'success' => false,
-                'remark' => 'Only admins can enroll students'
+                'remark' => 'Only admins can view students'
             ], 403);
         }
 
-        if(!$class->is_active) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Class is inactive',
-                'success' => false,
-                'remark' => 'Cannot enroll students to an inactive class'
-            ], 400);
-        }
-
-        $currentEnrollments = $class->enrolments()->where('is_active', true)->count();
-
-        if($currentEnrollments >= $class->max_students) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Class is full',
-                'success' => false,
-                'remark' => 'Cannot enroll more students, class capacity reached'
-            ], 400);
-        }
-
         try {
-            $request->validate([
-                'student_code' => 'required|string|exists:students,student_code'
-            ]);
-
-            $student = Student::where('student_code', $request->student_code)->first();
-
-            $existingEnrollment = ClassEnrollment::where('class_id', $class->id)
-                ->where('student_id', $class->id)
-                ->first();
-
-            if($existingEnrollment) {
-                return response()->json([
-                    'data' => null,
-                    'message' => 'Student already enrolled',
-                    'success' => false,
-                    'remark' => 'The student is already enrolled in this class'
-                ], 400);
-            }
-
-            $enrollment = ClassEnrollment::create([
-                'class_id' => $class->id,
-                'student_id' => $student->id,
-                'enrolled_at' => now(),
-                'is_active' => true,
-            ]);
+            $students = Student::with(['user', 'classModel'])->paginate(20);
 
             return response()->json([
-                'data' => $enrollment,
-                'message' => 'Student enrolled successfully',
+                'data' => $students,
+                'message' => 'Students retrieved successfully',
                 'success' => true,
-                'remark' => 'Student added to class'
-            ], 201);
-        } catch (ValidationException $e) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Validation failed',
-                'success' => false,
-                'remark' => $e->errors()
-            ], 422);
+                'remark' => 'All student records with user and class details'
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'data' => null,
-                'message' => 'Failed to enroll student',
+                'message' => 'Failed to retrieve students',
                 'success' => false,
                 'remark' => $e->getMessage()
             ], 500);
         }
     });
 
-    //add bulk students to class
-    Route::post('/admin/classes/{class}/students/batch', function(Request $request, ClassModel $class) {
+    Route::delete('/admin/students/{student}', function(Request $request, Student $student) {
         $admin = Admin::where('user_id', $request->user()->id)->first();
-        if (!$admin) {
+        if(!$admin) {
             return response()->json([
                 'data' => null,
                 'message' => 'Unauthorized',
                 'success' => false,
-                'remark' => 'Only admins can bulk add students to classes'
+                'remark' => 'Only admins can delete students'
             ], 403);
         }
 
-        if (!$class->is_active) {
+        try {
+            DB::beginTransaction();
+
+            $student->user()->delete();
+            $student->delete();
+
+            DB::commit();
+
             return response()->json([
                 'data' => null,
-                'message' => 'Class is inactive',
+                'message' => 'Student deleted successfully',
+                'success' => true,
+                'remark' => 'Student and associated user record deleted'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete student',
                 'success' => false,
-                'remark' => 'Cannot add students to an inactive class'
-            ], 400);
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::post('/admin/students/batch-delete', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can delete students'
+            ], 403);
         }
 
         try {
             $request->validate([
-                'xlsx_file' => 'required|file|mimes:xlsx,csv,txt|max:2048'
+                'student_ids' => 'required|array',
+                'student_ids.*' => 'exists:students,id',
             ]);
-
-            $file = $request->file('xlsx_file');
-            $spreadsheet = IOFactory::load($file->getRealPath());  // Header: student_code
-            $sheet = $spreadsheet->getActiveSheet();
-            $rows = $sheet->toArray();
-
-            $header = array_shift($rows); // Extract header row
-            $errors = [];
-            $created = [];
-            $currentEnrolments = $class->enrolments()->count();
 
             DB::beginTransaction();
 
-            foreach ($rows as $row) {
-                if ($currentEnrolments >= $class->max_students) {
-                    $errors[] = ['row' => $row, 'errors' => ['class' => 'Class is full']];
-                    continue;
-                }
-
-                $data = array_combine($header, $row);
-                $validator = Validator::make($data, [
-                    'student_code' => 'required|string|exists:students,student_code'
-                ]);
-
-                if ($validator->fails()) {
-                    $errors[] = ['row' => $data, 'errors' => $validator->errors()];
-                    continue;
-                }
-
-                $student = Student::where('student_code', $data['student_code'])->first();
-
-                $existingEnrolment = ClassEnrollment::where('student_id', $student->id)
-                    ->where('class_id', $class->id)
-                    ->first();
-                if ($existingEnrolment) {
-                    $errors[] = ['row' => $data, 'errors' => ['enrolment' => 'Student already enrolled']];
-                    continue;
-                }
-
-                $enrolment = ClassEnrollment::create([
-                    'student_id' => $student->id,
-                    'class_id' => $class->id,
-                    'enrolled_at' => now(),
-                    'is_active' => true
-                ]);
-                $created[] = $enrolment;
-                $currentEnrolments++;
+            $students = Student::whereIn('id', $request->student_ids)->get();
+            foreach ($students as $student) {
+                $student->user()->delete();
+                $student->delete();
             }
+
             DB::commit();
 
             return response()->json([
-                'data' => ['created' => $created, 'errors' => $errors],
-                'message' => 'Bulk students added to class',
+                'data' => null,
+                'message' => 'Students deleted successfully',
                 'success' => true,
-                'remark' => count($created) . ' enrolments created, ' . count($errors) . ' errors'
+                'remark' => count($students) . ' student records deleted'
             ]);
-        } catch (ValidationException $e) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Validation failed',
-                'success' => false,
-                'remark' => $e->errors()
-            ], 422);
         } catch (\Exception $e) {
-            DB::rollBack();
             return response()->json([
                 'data' => null,
-                'message' => 'Failed to bulk add students to class',
+                'message' => 'Failed to delete students',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    //remove student from class
+    Route::put('/admin/students/{student}/remove-from-class', function(Request $request, Student $student) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can remove students from classes'
+            ], 403);
+        }
+
+        try {
+            $student->class_id = null;
+            $student->save();
+
+            return response()->json([
+                'data' => $student,
+                'message' => 'Student removed from class successfully',
+                'success' => true,
+                'remark' => 'Student class association cleared'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to remove student from class',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    });
+
+    Route::post('/admin/students/batch-remove-from-classes', function(Request $request) {
+        $admin = Admin::where('user_id', $request->user()->id)->first();
+        if(!$admin) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Unauthorized',
+                'success' => false,
+                'remark' => 'Only admins can remove students from classes'
+            ], 403);
+        }
+
+        try {
+            $request->validate([
+                'student_ids' => 'required|array',
+                'student_ids.*' => 'exists:students,id',
+            ]);
+
+            Student::whereIn('id', $request->student_ids)
+                ->update(['class_id' => null]);
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Students removed from classes successfully',
+                'success' => true,
+                'remark' => count($request->student_ids) . ' students removed from their classes'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to remove students from classes',
                 'success' => false,
                 'remark' => $e->getMessage()
             ], 500);

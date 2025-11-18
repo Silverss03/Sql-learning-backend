@@ -9,7 +9,8 @@ class Student extends Model
     protected $fillable = [
         'user_id', 
         'student_code',
-        'avg_score'
+        'avg_score',
+        'class_id'
     ] ;
 
     public function user()
@@ -35,5 +36,10 @@ class Student extends Model
     public function chapterExerciseProgress()
     {
         return $this->hasMany(StudentChapterExerciseProgress::class);
+    }
+
+    public function classModel()
+    {
+        return $this->belongsTo(ClassModel::class, 'class_id');
     }
 }

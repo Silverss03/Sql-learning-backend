@@ -12,7 +12,8 @@ class Exam extends Model{
         'start_time',
         'end_time',
         'is_active',
-        'created_by'
+        'created_by',
+        'class_id'
     ];
 
     protected $casts = [
@@ -49,5 +50,10 @@ class Exam extends Model{
     public function submissions()
     {
         return $this->hasMany(Submission::class);
+    }
+
+    public function classModel()
+    {
+        return $this->belongsTo(ClassModel::class, 'class_id');
     }
 }

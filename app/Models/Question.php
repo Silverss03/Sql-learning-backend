@@ -10,7 +10,6 @@ class Question extends Model
         'lesson_exercise_id', 'question_type',
         'order_index',
         'is_active',
-        'created_by',
         'question_title','chapter_exercise_id',
         'exam_id'
     ];

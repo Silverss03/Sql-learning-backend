@@ -9,7 +9,6 @@ class ChapterExercise extends Model
     protected $fillable = [
         'topic_id',
         'is_active',
-        'created_by',
         'activated_at',
         'description',
     ];
@@ -17,11 +16,6 @@ class ChapterExercise extends Model
     public function topic()
     {
         return $this->belongsTo(Topic::class);
-    }
-
-    public function creator()
-    {
-        return $this->belongsTo(Admin::class, 'created_by');
     }
 
     public function questions()

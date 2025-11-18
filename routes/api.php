@@ -611,7 +611,6 @@ Route::middleware('auth:sanctum')->group(function () {
             $chapterExercise = ChapterExercise::create([
                 'topic_id' => $request->topic_id,
                 'is_active' => $request->is_active ?? false,
-                'created_by' => $admin->id,
                 'activated_at' => $request->activated_at,
             ]);
 
@@ -981,13 +980,11 @@ Route::middleware('auth:sanctum')->group(function () {
                 $exercise = LessonExercise::create([
                     'lesson_id' => $request->parent_id,
                     'is_active' => true,
-                    'created_by' => $teacher->id
                 ]);
             } elseif ($request->exercise_type === 'chapter') {
                 $exercise = ChapterExercise::create([
                     'topic_id' => $request->parent_id,
                     'is_active' => true,
-                    'created_by' => $teacher->id
                 ]);
             } else {  // exam
                 $class = ClassModel::where('id', $request->class_id)->where('teacher_id', $teacher->id)->first();
@@ -1024,7 +1021,6 @@ Route::middleware('auth:sanctum')->group(function () {
                     'order_index' => $questionData['order_index'],
                     'question_title' => $questionData['title'],
                     'is_active' => true,
-                    'created_by' => $teacher->id
                 ]);
 
                 // Create specific question type
@@ -1943,7 +1939,6 @@ Route::middleware('auth:sanctum')->group(function () {
                 'max_students' => $request->max_students ?? 35,
                 'academic_year' => $request->academic_year,
                 'is_active' => true,
-                'created_by' => $admin->id
             ]);
 
             return response()->json([
@@ -2027,7 +2022,6 @@ Route::middleware('auth:sanctum')->group(function () {
                     'max_students' => $data['max_students'],
                     'academic_year' => $data['academic_year'],
                     'is_active' => true,
-                    'created_by' => $admin->id
                 ]);
 
                 $created[] = $teacher;
@@ -2502,7 +2496,6 @@ Route::post('/lessons', function(Request $request) {
             'estimated_time'=> 'nullable|integer',
             'is_active'=> 'required|boolean',
             'order_index'=> 'nullable|integer',
-            'created_by'=> 'required|exists:users,id'
         ]);
 
         $lesson = Lesson::create([
@@ -2513,7 +2506,6 @@ Route::post('/lessons', function(Request $request) {
             'estimated_time' => $request->estimated_time,
             'is_active' => $request->is_active,
             'order_index' => $request->order_index,
-            'created_by' => $request->created_by
         ]);
 
         return response()->json([

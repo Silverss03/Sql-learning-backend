@@ -15,17 +15,11 @@ class ClassModel extends Model
         'semester',
         'max_students',
         'academic_year',
-        'created_by'
     ];
 
     public function teacher()
     {
         return $this->belongsTo(Teacher::class);
-    }
-
-    public function enrolments()
-    {
-        return $this->hasMany(ClassEnrollment::class, 'class_id');
     }
 
     public function students()

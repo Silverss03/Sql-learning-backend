@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class LessonExercise extends Model
 {
-    protected $fillable = ['lesson_id', 'is_active', 'created_by', 'created_at', 'updated_at'];
+    protected $fillable = ['lesson_id', 'is_active', 'created_at', 'updated_at'];
 
     /**
      * Define a one-to-one relationship with the Lesson model.

@@ -1002,7 +1002,6 @@ Route::middleware('auth:sanctum')->group(function () {
                 }
 
                 $exercise = Exam::create([
-                    'topic_id' => $request->parent_id,  // Nullable
                     'title' => $request->exam_title ?? 'Untitled Exam',
                     'description' => $request->exam_description,
                     'duration_minutes' => $request->exam_duration_minutes ?? 60,
@@ -1090,48 +1089,6 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Exams CRUD and Retrieval
-    Route::get('/topics/{topic}/exams', function(Topic $topic) {
-        try {
-            $student = Student::where('user_id', request()->user()->id)->first();
-
-            if (!$student) {
-                return response()->json([
-                    'data' => null,
-                    'message' => 'Student not found',
-                    'success' => false,
-                    'remark' => 'No student record for the authenticated user'
-                ], 404);
-            }
-
-            $exams = Exam::where('class_id', $student->class_id)
-                ->where('topic_id', $topic->id)
-                ->where('is_active', true)
-                ->leftJoin('student_exam_progress', function ($join) use ($student) {
-                    $join->on('exams.id', '=', 'student_exam_progress.exam_id')
-                        ->where('student_exam_progress.student_id', '=', $student->id);
-                })
-                ->select('exams.*',
-                        'student_exam_progress.is_completed',
-                        'student_exam_progress.score',
-                        'student_exam_progress.completed_at')
-                ->orderBy('exams.start_time')
-                ->get();
-
-            return response()->json([
-                'data' => $exams,
-                'message' => 'Exams retrieved successfully',
-                'success' => true,
-                'remark' => 'All exams for the topic'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Failed to retrieve exams',
-                'success' => false,
-                'remark' => $e->getMessage()
-            ], 500);
-        }
-    });
 
     Route::get('/exams/{exam}', function(Exam $exam) {
         try {

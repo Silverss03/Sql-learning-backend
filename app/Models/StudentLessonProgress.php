@@ -10,6 +10,14 @@ class StudentLessonProgress extends Model
         'student_id',
         'lesson_id',
         'finished_at',
+        'score',
+        'submitted_at'
+    ];
+
+    protected $casts = [
+        'finished_at' => 'datetime',
+        'submitted_at' => 'datetime',
+        'score' => 'decimal:2',
     ];
 
     public function student()

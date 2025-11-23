@@ -10,11 +10,11 @@ class StudentChapterExerciseProgress extends Model
         'student_id',
         'chapter_exercise_id',
         'score',
-        'completed_at',
+        'submitted_at',
     ];
 
     protected $casts = [
-        'completed_at' => 'datetime',
+        'submitted_at' => 'datetime',
     ];
 
     public function student()

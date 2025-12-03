@@ -5,11 +5,29 @@
          colors="true"
 >
     <testsuites>
-        <testsuite name="Unit">
-            <directory>tests/Unit</directory>
+        <testsuite name="TeacherManagement">
+            <directory>tests/Unit/TeacherManagement</directory>
         </testsuite>
-        <testsuite name="Feature">
-            <directory>tests/Feature</directory>
+        <testsuite name="StudentManagement">
+            <directory>tests/Unit/StudentManagement</directory>
+        </testsuite>
+        <testsuite name="ClassManagement">
+            <directory>tests/Unit/ClassManagement</directory>
+        </testsuite>
+        <testsuite name="TopicManagement">
+            <directory>tests/Unit/TopicManagement</directory>
+        </testsuite>
+        <testsuite name="LessonManagement">
+            <directory>tests/Unit/LessonManagement</directory>
+        </testsuite>
+        <testsuite name="ExerciseManagement">
+            <directory>tests/Unit/ExerciseManagement</directory>
+        </testsuite>
+        <testsuite name="ExamManagement">
+            <directory>tests/Unit/ExamManagement</directory>
+        </testsuite>
+        <testsuite name="QuestionManagement">
+            <directory>tests/Unit/QuestionManagement</directory>
         </testsuite>
     </testsuites>
     <source>
@@ -22,8 +40,12 @@
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="CACHE_STORE" value="array"/>
-        <env name="DB_CONNECTION" value="sqlite"/>
-        <env name="DB_DATABASE" value=":memory:"/>
+        <env name="DB_CONNECTION" value="mysql"/>
+        <env name="DB_HOST" value="127.0.0.1"/>
+        <env name="DB_PORT" value="3306"/>
+        <env name="DB_DATABASE" value="sql_learning_test"/>
+        <env name="DB_USERNAME" value="root"/>
+        <env name="DB_PASSWORD" value=""/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

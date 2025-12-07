@@ -26,13 +26,16 @@
         <testsuite name="ExamManagement">
             <directory>tests/Unit/ExamManagement</directory>
         </testsuite>
+        <testsuite name="Authentication">
+            <directory>tests/Unit/Authentication</directory>
+        </testsuite>
         <testsuite name="QuestionManagement">
             <directory>tests/Unit/QuestionManagement</directory>
         </testsuite>
     </testsuites>
     <source>
         <include>
-            <directory>app</directory>
+            <directory suffix=".php">app</directory>
         </include>
     </source>
     <php>

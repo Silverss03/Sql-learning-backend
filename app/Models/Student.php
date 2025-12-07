@@ -18,11 +18,6 @@ class Student extends Model
         return $this->belongsTo(User::class);
     }
 
-    public function enrolments()
-    {
-        return $this->hasMany(ClassEnrollment::class);
-    }
-
     public function submissions()
     {
         return $this->hasMany(Submission::class);

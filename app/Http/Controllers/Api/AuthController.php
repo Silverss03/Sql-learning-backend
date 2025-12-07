@@ -12,53 +12,53 @@ class AuthController extends Controller
     /**
      * Register a new user
      */
-    public function register(Request $request)
-    {
-        try {
-            $request->validate([
-                'name' => 'required|string|max:255',
-                'email' => 'required|email|unique:users',
-                'password' => 'required|min:8|confirmed',
-                'role' => 'required|in:admin,teacher,student'
-            ]);
+    // public function register(Request $request)
+    // {
+    //     try {
+    //         $request->validate([
+    //             'name' => 'required|string|max:255',
+    //             'email' => 'required|email|unique:users',
+    //             'password' => 'required|min:8|confirmed',
+    //             'role' => 'required|in:admin,teacher,student'
+    //         ]);
 
-            $user = User::create([
-                'name' => $request->name,
-                'email' => $request->email,
-                'password' => Hash::make($request->password),
-                'role' => $request->role,
-                'is_active' => true
-            ]);
+    //         $user = User::create([
+    //             'name' => $request->name,
+    //             'email' => $request->email,
+    //             'password' => Hash::make($request->password),
+    //             'role' => $request->role,
+    //             'is_active' => true
+    //         ]);
 
-            $token = $user->createToken('auth-token')->plainTextToken;
+    //         $token = $user->createToken('auth-token')->plainTextToken;
 
-            return response()->json([
-                'data' => [
-                    'user' => $user,
-                    'access_token' => $token,
-                    'token_type' => 'Bearer'
-                ],
-                'message' => 'Registration successful',
-                'success' => true,
-                'remark' => 'User registered and authenticated successfully'
-            ], 201);
+    //         return response()->json([
+    //             'data' => [
+    //                 'user' => $user,
+    //                 'access_token' => $token,
+    //                 'token_type' => 'Bearer'
+    //             ],
+    //             'message' => 'Registration successful',
+    //             'success' => true,
+    //             'remark' => 'User registered and authenticated successfully'
+    //         ], 201);
 
-        } catch (\Illuminate\Validation\ValidationException $e) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Validation failed',
-                'success' => false,
-                'remark' => $e->errors()
-            ], 422);
-        } catch (\Exception $e) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Registration failed',
-                'success' => false,
-                'remark' => $e->getMessage()
-            ], 500);
-        }
-    }
+    //     } catch (\Illuminate\Validation\ValidationException $e) {
+    //         return response()->json([
+    //             'data' => null,
+    //             'message' => 'Validation failed',
+    //             'success' => false,
+    //             'remark' => $e->errors()
+    //         ], 422);
+    //     } catch (\Exception $e) {
+    //         return response()->json([
+    //             'data' => null,
+    //             'message' => 'Registration failed',
+    //             'success' => false,
+    //             'remark' => $e->getMessage()
+    //         ], 500);
+    //     }
+    // }
 
     /**
      * Login user

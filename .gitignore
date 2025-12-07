@@ -1,4 +1,7 @@
 *.log
+*.md
+sql_learning_app (1).sql
+database/*
 .DS_Store
 .env
 .env.backup

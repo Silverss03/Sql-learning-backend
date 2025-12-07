@@ -21,6 +21,11 @@ class Lesson extends Model
         return $this->belongsTo(Topic::class);
     }
 
+    public function lessonExercises()
+    {
+        return $this->hasMany(LessonExercise::class);
+    }
+
     public function questions()
     {
         return $this->hasMany(Question::class);
@@ -29,5 +34,21 @@ class Lesson extends Model
     public function studentProgress()
     {
         return $this->hasMany(StudentLessonProgress::class);
+    }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        // When a lesson is deleted, delete all related exercises and questions
+        static::deleting(function ($lesson) {
+            // Delete lesson exercises (which will cascade to questions)
+            $lesson->lessonExercises()->each(function ($exercise) {
+                $exercise->delete();
+            });
+            
+            // Delete student progress
+            $lesson->studentProgress()->delete();
+        });
     }
 }

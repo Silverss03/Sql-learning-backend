@@ -151,8 +151,7 @@ class ExamController extends Controller
             $exam = $this->examRepository->findById($request->exam_id);
 
             $now = now();
-            $isActive = $exam->is_active || ($exam->start_time <= $now && $now <= $exam->end_time);
-            if (!$isActive) {
+            if (!$exam->is_active || $now->lt($exam->start_time) || $now->gt($exam->end_time)) {
                 return response()->json([
                     'data' => null,
                     'message' => 'Exam is not currently active',

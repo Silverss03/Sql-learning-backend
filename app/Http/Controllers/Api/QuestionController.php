@@ -43,9 +43,9 @@ class QuestionController extends Controller
                 'parent_id' => 'nullable|integer',
                 'exam_title' => 'nullable|string|max:255',
                 'exam_description' => 'nullable|string',
-                'exam_duration_minutes' => 'nullable|integer|min:1',
-                'exam_start_time' => 'nullable|date',
-                'exam_end_time' => 'nullable|date|after:exam_start_time',
+                'exam_duration_minutes' => 'required_if:exercise_type,exam|integer|min:1',
+                'exam_start_time' => 'required_if:exercise_type,exam|date',
+                'exam_end_time' => 'required_if:exercise_type,exam|date|after:exam_start_time',
                 'class_id' => 'required_if:exercise_type,exam|exists:classes,id',
                 'questions' => 'required|array|min:1',
                 'questions.*.type' => 'required|in:multiple_choice,sql',
@@ -96,6 +96,7 @@ class QuestionController extends Controller
                 'exercise_type' => $request->exercise_type,
                 'parent_id' => $request->parent_id,
                 'teacher_id' => $teacher->id,
+                'created_by' => $teacher->user_id,
                 'questions' => $request->questions,
             ];
 

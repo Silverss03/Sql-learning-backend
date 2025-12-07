@@ -11,7 +11,8 @@ class Question extends Model
         'order_index',
         'is_active',
         'question_title','chapter_exercise_id',
-        'exam_id'
+        'exam_id',
+        'lesson_id'
     ];
 
     public function lesson()
@@ -37,5 +38,10 @@ class Question extends Model
     public function exam()
     {
         return $this->belongsTo(Exam::class);
+    }
+
+    public function lessonExercise()
+    {
+        return $this->belongsTo(LessonExercise::class, 'lesson_exercise_id');
     }
 }

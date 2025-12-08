@@ -27,7 +27,7 @@ use App\Http\Controllers\Api\AdminController;
 // ============================================
 
 // Authentication routes
-Route::post('/register', [AuthController::class, 'register']);
+// Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 
 // ============================================
@@ -129,6 +129,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/classes', [AdminController::class, 'createClass']);
         Route::post('/classes/bulk', [AdminController::class, 'bulkCreateClasses']);
         Route::get('/classes', [AdminController::class, 'getClasses']);
+        Route::put('/classes/{classModel}', [AdminController::class, 'updateClass']);
         Route::delete('/classes/{classModel}', [AdminController::class, 'deleteClass']);
         Route::post('/classes/batch-delete', [AdminController::class, 'batchDeleteClasses']);
         
@@ -140,5 +141,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/students/batch-delete', [AdminController::class, 'batchDeleteStudents']);
         Route::put('/students/{student}/remove-from-class', [AdminController::class, 'removeStudentFromClass']);
         Route::post('/students/batch-remove-from-classes', [AdminController::class, 'batchRemoveStudentsFromClasses']);
+        
+        // Lesson Management
+        Route::post('/lessons', [AdminController::class, 'createLesson']);
+        Route::put('/lessons/{lesson}', [AdminController::class, 'updateLesson']);
+        Route::delete('/lessons/{lesson}', [AdminController::class, 'deleteLesson']);
+        
+        // Lesson Exercise Management
+        Route::post('/lesson-exercises', [AdminController::class, 'createLessonExercise']);
+        Route::put('/lesson-exercises/{exercise}', [AdminController::class, 'updateLessonExercise']);
+        Route::delete('/lesson-exercises/{exercise}', [AdminController::class, 'deleteLessonExercise']);
     });
 });

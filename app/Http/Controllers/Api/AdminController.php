@@ -14,6 +14,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use App\Repositories\Interfaces\LessonRepositoryInterface;
+use App\Models\Lesson;
 
 class AdminController extends Controller
 {
@@ -335,14 +337,24 @@ class AdminController extends Controller
 
         try {
             $request->validate([
-                'name' => 'required|string|max:255',
-                'teacher_id' => 'required|exists:teachers,id'
+                'class_code' => 'required|string|max:255',
+                'teacher_id' => 'required|exists:teachers,id',
+                'class_name' => 'nullable|string|max:255',
+                'is_active' => 'nullable|boolean',
+                'semester' => 'nullable|string|max:255',
+                'max_students' => 'nullable|integer|min:1',
+                'academic_year' => 'nullable|string|max:255'
             ]);
 
-            $class = ClassModel::create([
-                'name' => $request->name,
-                'teacher_id' => $request->teacher_id
-            ]);
+            $class = ClassModel::create($request->only([
+                'class_code',
+                'class_name',
+                'teacher_id',
+                'is_active',
+                'semester',
+                'max_students',
+                'academic_year'
+            ]));
 
             return response()->json([
                 'data' => $class->load('teacher.user'),
@@ -381,7 +393,7 @@ class AdminController extends Controller
         try {
             $request->validate([
                 'classes' => 'required|array',
-                'classes.*.name' => 'required|string|max:255',
+                'classes.*.class_code' => 'required|string|max:255',
                 'classes.*.teacher_id' => 'required|exists:teachers,id'
             ]);
 
@@ -390,7 +402,7 @@ class AdminController extends Controller
             $createdClasses = [];
             foreach ($request->classes as $classData) {
                 $class = ClassModel::create([
-                    'name' => $classData['name'],
+                    'class_code' => $classData['code'],
                     'teacher_id' => $classData['teacher_id']
                 ]);
                 $createdClasses[] = $class;
@@ -455,6 +467,61 @@ class AdminController extends Controller
     }
 
     /**
+     * Update a class
+     */
+    public function updateClass(Request $request, ClassModel $classModel)
+    {
+        $adminCheck = $this->verifyAdmin($request);
+        if ($adminCheck instanceof \Illuminate\Http\JsonResponse) {
+            return $adminCheck;
+        }
+
+        try {
+            $request->validate([
+                'class_code' => 'nullable|string|max:255',
+                'class_name' => 'nullable|string|max:255',
+                'teacher_id' => 'nullable|exists:teachers,id',
+                'is_active' => 'nullable|boolean',
+                'semester' => 'nullable|string|max:255',
+                'max_students' => 'nullable|integer|min:1',
+                'academic_year' => 'nullable|string|max:255'
+            ]);
+
+            $classModel->update($request->only([
+                'class_code',
+                'class_name',
+                'teacher_id',
+                'is_active',
+                'semester',
+                'max_students',
+                'academic_year'
+            ]));
+
+            return response()->json([
+                'data' => $classModel->load('teacher.user'),
+                'message' => 'Class updated successfully',
+                'success' => true,
+                'remark' => 'Class information updated'
+            ]);
+
+        } catch (ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to update class',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Delete a class
      */
     public function deleteClass(Request $request, ClassModel $classModel)
@@ -497,7 +564,7 @@ class AdminController extends Controller
         try {
             $request->validate([
                 'class_ids' => 'required|array',
-                'class_ids.*' => 'exists:class_models,id'
+                'class_ids.*' => 'exists:classes,id'
             ]);
 
             $deletedCount = ClassModel::whereIn('id', $request->class_ids)->delete();
@@ -545,7 +612,8 @@ class AdminController extends Controller
                 'email' => 'required|email|unique:users,email',
                 'password' => 'nullable|string|min:8',
                 'name' => 'required|string|max:255',
-                'class_id' => 'nullable|exists:class_models,id'
+                'class_id' => 'required|exists:classes,id',
+                'student_code'=>'nullable|string'
             ]);
 
             DB::beginTransaction();
@@ -560,21 +628,14 @@ class AdminController extends Controller
 
             $student = Student::create([
                 'user_id' => $user->id,
-                'class_id' => $request->class_id
+                'class_id' => $request->class_id,
+                'student_code'=>$request->student_code
             ]);
-
-            // If class is assigned, create enrollment
-            if ($request->class_id) {
-                ClassEnrollment::create([
-                    'student_id' => $student->id,
-                    'class_id' => $request->class_id
-                ]);
-            }
 
             DB::commit();
 
             return response()->json([
-                'data' => $student->load('user', 'class'),
+                'data' => $student->load('user', 'classModel'), 
                 'message' => 'Student added successfully',
                 'success' => true,
                 'remark' => 'New student user and record created'
@@ -658,14 +719,6 @@ class AdminController extends Controller
                         'class_id' => $classId
                     ]);
 
-                    // If class is assigned, create enrollment
-                    if ($classId) {
-                        ClassEnrollment::create([
-                            'student_id' => $student->id,
-                            'class_id' => $classId
-                        ]);
-                    }
-
                     $createdStudents[] = $student;
 
                 } catch (\Exception $e) {
@@ -717,7 +770,7 @@ class AdminController extends Controller
         }
 
         try {
-            $students = Student::with('user', 'class')->get();
+            $students = Student::with('user', 'classModel')->get();
 
             return response()->json([
                 'data' => $students,
@@ -842,9 +895,6 @@ class AdminController extends Controller
         try {
             DB::beginTransaction();
 
-            // Remove class enrollment
-            ClassEnrollment::where('student_id', $student->id)->delete();
-
             // Update student record
             $student->update(['class_id' => null]);
 
@@ -886,9 +936,6 @@ class AdminController extends Controller
 
             DB::beginTransaction();
 
-            // Remove enrollments
-            ClassEnrollment::whereIn('student_id', $request->student_ids)->delete();
-
             // Update student records
             $updatedCount = Student::whereIn('id', $request->student_ids)
                 ->update(['class_id' => null]);
@@ -920,4 +967,322 @@ class AdminController extends Controller
             ], 500);
         }
     }
+
+    // ==========================================
+    // LESSON MANAGEMENT
+    // ==========================================
+
+    /**
+     * Create a new lesson
+     */
+    public function createLesson(Request $request)
+    {
+        $adminCheck = $this->verifyAdmin($request);
+        if ($adminCheck instanceof \Illuminate\Http\JsonResponse) {
+            return $adminCheck;
+        }
+
+        try {
+            $request->validate([
+                'topic_id' => 'required|exists:topics,id',
+                'lesson_title' => 'required|string|max:255',
+                'lesson_content' => 'required|string',
+                'estimated_time' => 'nullable|numeric',
+                'order_index' => 'required|numeric',
+                'is_active' => 'boolean'
+            ]);
+
+            $lessonRepository = app(\App\Repositories\Interfaces\LessonRepositoryInterface::class);
+            
+            $lesson = $lessonRepository->create($request->only([
+                'topic_id',
+                'lesson_title',
+                'lesson_content',
+                'estimated_time',
+                'order_index',
+                'is_active'
+            ]));
+
+            return response()->json([
+                'data' => $lesson,
+                'message' => 'Lesson created successfully',
+                'success' => true,
+                'remark' => 'New lesson record created'
+            ], 201);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to create lesson',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update a lesson
+     */
+    public function updateLesson(Request $request, Lesson $lesson)
+    {
+        $adminCheck = $this->verifyAdmin($request);
+        if ($adminCheck instanceof \Illuminate\Http\JsonResponse) {
+            return $adminCheck;
+        }
+
+        try {
+            $request->validate([
+                'topic_id' => 'nullable|exists:topics,id',
+                'lesson_title' => 'nullable|string|max:255',
+                'lesson_content' => 'nullable|string',
+                'estimated_time' => 'nullable|numeric',
+                'order_index' => 'nullable|numeric',
+                'is_active' => 'boolean'
+            ]);
+
+            $lessonRepository = app(\App\Repositories\Interfaces\LessonRepositoryInterface::class);
+            
+            $lesson = $lessonRepository->update(
+                $lesson->id,
+                $request->only([
+                    'topic_id',
+                    'lesson_title',
+                    'lesson_content',
+                    'estimated_time',
+                    'order_index',
+                    'is_active'
+                ])
+            );
+
+            if ($lesson === null) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson not found',
+                    'success' => false,
+                    'remark' => 'The requested lesson does not exist'
+                ], 404);
+            }
+
+            return response()->json([
+                'data' => $lesson,
+                'message' => 'Lesson updated successfully',
+                'success' => true,
+                'remark' => 'Lesson record updated'
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to update lesson',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a lesson
+     */
+    public function deleteLesson(Request $request, Lesson $lesson)
+    {
+        $adminCheck = $this->verifyAdmin($request);
+        if ($adminCheck instanceof \Illuminate\Http\JsonResponse) {
+            return $adminCheck;
+        }
+
+        try {
+            $lessonRepository = app(\App\Repositories\Interfaces\LessonRepositoryInterface::class);
+            
+            $deleted = $lessonRepository->delete($lesson->id);
+
+            if (!$deleted) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson not found',
+                    'success' => false,
+                    'remark' => 'The requested lesson does not exist'
+                ], 404);
+            }
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Lesson deleted successfully',
+                'success' => true,
+                'remark' => 'Lesson record deleted'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete lesson',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // ==========================================
+    // LESSON EXERCISE MANAGEMENT
+    // ==========================================
+
+    /**
+     * Create a new lesson exercise
+     */
+    public function createLessonExercise(Request $request)
+    {
+        $adminCheck = $this->verifyAdmin($request);
+        if ($adminCheck instanceof \Illuminate\Http\JsonResponse) {
+            return $adminCheck;
+        }
+
+        try {
+            $request->validate([
+                'lesson_id' => 'required|exists:lessons,id',
+                'exercise_title' => 'nullable|string|max:255',
+                'is_active' => 'boolean'
+            ]);
+
+            $lessonExerciseRepository = app(\App\Repositories\Interfaces\LessonExerciseRepositoryInterface::class);
+            
+            $exercise = $lessonExerciseRepository->create([
+                'lesson_id' => $request->lesson_id,
+                'is_active' => $request->is_active ?? true
+            ]);
+
+            return response()->json([
+                'data' => $exercise,
+                'message' => 'Lesson exercise created successfully',
+                'success' => true,
+                'remark' => 'New lesson exercise record created'
+            ], 201);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to create lesson exercise',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update a lesson exercise
+     */
+    public function updateLessonExercise(Request $request, $exerciseId)
+    {
+        $adminCheck = $this->verifyAdmin($request);
+        if ($adminCheck instanceof \Illuminate\Http\JsonResponse) {
+            return $adminCheck;
+        }
+
+        try {
+            $request->validate([
+                'lesson_id' => 'nullable|exists:lessons,id',
+                'is_active' => 'boolean'
+            ]);
+
+            $lessonExerciseRepository = app(\App\Repositories\Interfaces\LessonExerciseRepositoryInterface::class);
+            
+            $exercise = $lessonExerciseRepository->update(
+                $exerciseId,
+                $request->only(['lesson_id', 'is_active'])
+            );
+
+            if ($exercise === null) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson exercise not found',
+                    'success' => false,
+                    'remark' => 'The requested lesson exercise does not exist'
+                ], 404);
+            }
+
+            return response()->json([
+                'data' => $exercise,
+                'message' => 'Lesson exercise updated successfully',
+                'success' => true,
+                'remark' => 'Lesson exercise record updated'
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to update lesson exercise',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete a lesson exercise
+     */
+    public function deleteLessonExercise(Request $request, $exerciseId)
+    {
+        $adminCheck = $this->verifyAdmin($request);
+        if ($adminCheck instanceof \Illuminate\Http\JsonResponse) {
+            return $adminCheck;
+        }
+
+        try {
+            $lessonExerciseRepository = app(\App\Repositories\Interfaces\LessonExerciseRepositoryInterface::class);
+            
+            $deleted = $lessonExerciseRepository->delete($exerciseId);
+
+            if (!$deleted) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson exercise not found',
+                    'success' => false,
+                    'remark' => 'The requested lesson exercise does not exist'
+                ], 404);
+            }
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Lesson exercise deleted successfully',
+                'success' => true,
+                'remark' => 'Lesson exercise record deleted'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to delete lesson exercise',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // ==========================================
 }

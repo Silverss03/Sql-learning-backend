@@ -106,11 +106,18 @@ class TopicController extends Controller
     public function getProgress(Request $request, $topicId)
     {
         try {
-            $request->validate([
-                'user_id' => 'required|exists:users,id'
-            ]);
+            $student = $this->studentRepository->findByUserId($request->user()->id);
 
-            $student = $this->studentRepository->findByUserId($request->user_id);
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record associated with the authenticated user'
+                ], 404);
+            }
+
+            $progress = $this->topicRepository->getTopicProgress($topicId, $student->id);
 
             if (!$student) {
                 return response()->json([

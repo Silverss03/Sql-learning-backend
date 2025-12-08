@@ -32,4 +32,14 @@ class LessonExercise extends Model
         return $this->belongsToMany(Student::class, 'submissions', 'lesson_exercise_id', 'student_id')
                     ->withPivot('submitted_sql', 'is_correct', 'submitted_at', 'chosen_answer', 'question_type', 'score');
     }
+
+    protected static function boot()
+    {
+        parent::boot();
+
+        // When a lesson exercise is deleted, delete all related questions
+        static::deleting(function ($lessonExercise) {
+            $lessonExercise->questions()->delete();
+        });
+    }
 }

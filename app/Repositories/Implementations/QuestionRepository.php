@@ -10,6 +10,7 @@ use App\Models\MultipleChoiceQuestion;
 use App\Models\InteractiveSqlQuestion;
 use App\Repositories\Interfaces\QuestionRepositoryInterface;
 use Illuminate\Support\Facades\DB;
+use App\Models\ClassModel;
 
 class QuestionRepository implements QuestionRepositoryInterface
 {
@@ -91,6 +92,14 @@ class QuestionRepository implements QuestionRepositoryInterface
                 ]);
 
             case 'exam':
+                $class = ClassModel::where('id', $data['class_id'])
+                    ->where('teacher_id', $data['teacher_id'])
+                    ->first();
+
+                if (!$class) {
+                    throw new \Exception('Unauthorized: You can only create exams for your own classes');
+                }
+
                 return Exam::create([
                     'title' => $data['exam_title'] ?? 'Untitled Exam',
                     'description' => $data['exam_description'] ?? null,
@@ -98,7 +107,7 @@ class QuestionRepository implements QuestionRepositoryInterface
                     'start_time' => $data['exam_start_time'] ?? now()->addMinutes(10),
                     'end_time' => $data['exam_end_time'] ?? now()->addHours(2),
                     'is_active' => false,
-                    'created_by' => $data['teacher_id'],
+                    'created_by' => $data['created_by'],
                     'class_id' => $data['class_id']
                 ]);
 

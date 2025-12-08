@@ -12,7 +12,8 @@ class Exam extends Model{
         'end_time',
         'is_active',
         'created_by',
-        'class_id'
+        'class_id',
+        'topic_id'
     ];
 
     protected $casts = [

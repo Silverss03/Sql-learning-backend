@@ -6,6 +6,7 @@ use Illuminate\Support\ServiceProvider;
 use App\Repositories\Interfaces\TopicRepositoryInterface;
 use App\Repositories\Interfaces\StudentRepositoryInterface;
 use App\Repositories\Interfaces\LessonRepositoryInterface;
+use App\Repositories\Interfaces\LessonExerciseRepositoryInterface;
 use App\Repositories\Interfaces\ExamRepositoryInterface;
 use App\Repositories\Interfaces\ChapterExerciseRepositoryInterface;
 use App\Repositories\Interfaces\QuestionRepositoryInterface;
@@ -15,6 +16,7 @@ use App\Repositories\Implementations\ChapterExerciseRepository;
 use App\Repositories\Implementations\QuestionRepository;
 use App\Repositories\Implementations\StudentRepository;
 use App\Repositories\Implementations\LessonRepository;
+use App\Repositories\Implementations\LessonExerciseRepository;
 
 class RepositoryServiceProvider extends ServiceProvider
 {    /**
@@ -43,6 +45,11 @@ class RepositoryServiceProvider extends ServiceProvider
         );        $this->app->bind(
             ChapterExerciseRepositoryInterface::class,
             ChapterExerciseRepository::class
+        );
+
+        $this->app->bind(
+            LessonExerciseRepositoryInterface::class,
+            LessonExerciseRepository::class
         );
 
         $this->app->bind(

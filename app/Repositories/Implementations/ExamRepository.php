@@ -19,7 +19,7 @@ class ExamRepository implements ExamRepositoryInterface
     public function getFutureExamsByClass($classId)
     {
         return Exam::where('class_id', $classId)
-            ->where('start_time', '>', now())
+            ->where('end_time', '>', now())
             ->orderBy('start_time')
             ->get()
             ->map(function ($exam) {
@@ -40,6 +40,28 @@ class ExamRepository implements ExamRepositoryInterface
                     'submitted_at' => null,
                 ];
             });
+    }
+
+    public function getExamHistoryByStudent($studentId)
+    {
+        $progressRecords = StudentExamProgress::where('student_id', $studentId)
+            ->where('is_completed', true)
+            ->with('exam')
+            ->orderBy('submitted_at', 'desc')
+            ->get();
+
+        return $progressRecords->map(function ($record) {
+            return [
+                'exam_id' => $record->exam->id,
+                'title' => $record->exam->title,
+                'description' => $record->exam->description,
+                'duration_minutes' => $record->exam->duration_minutes,
+                'start_time' => $record->exam->start_time,
+                'end_time' => $record->exam->end_time,
+                'score' => $record->score,
+                'submitted_at' => $record->submitted_at,
+            ];
+        });
     }
 
     public function getExamWithQuestions($examId)

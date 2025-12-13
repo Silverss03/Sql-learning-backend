@@ -6,6 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Support\Facades\Mail;
+use App\Mail\ResetPasswordMail;
+use Illuminate\Support\Facades\DB;
 
 class AuthController extends Controller
 {
@@ -156,5 +162,186 @@ class AuthController extends Controller
             'success' => true,
             'remark' => 'Current authenticated user information'
         ]);
+    }
+
+    /**
+     * Send password reset link to user's email
+     */
+    public function forgotPassword(Request $request)
+    {
+        try {
+            $request->validate([
+                'email' => 'required|email'
+            ]);
+
+            // Check if user exists
+            $user = User::where('email', $request->email)->first();
+
+            if (!$user) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Không tìm thấy tài khoản với email này',
+                    'success' => false,
+                    'remark' => 'User with this email does not exist'
+                ], 404);
+            }
+
+            $token = Str::random(6);
+        
+            DB::table('password_reset_tokens')->updateOrInsert(
+                ['email' => $request->email],
+                [
+                    'token' => Hash::make($token),
+                    'created_at' => now()
+                ]
+            );
+
+            // Send email using the Mailable class
+            Mail::to($user->email)->send(new ResetPasswordMail($token, $user->email));
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Mã xác thực đã được gửi đến email của bạn',
+                'success' => true,
+                'remark' => 'Password reset token sent to email'
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Đã xảy ra lỗi. Vui lòng thử lại sau',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reset user password using token
+     */
+    public function resetPassword(Request $request)
+    {
+        try {
+            $request->validate([
+                'token' => 'required',
+                'email' => 'required|email',
+                'password' => 'required|min:8|confirmed'
+            ]);
+
+            $status = Password::reset(
+                $request->only('email', 'password', 'password_confirmation', 'token'),
+                function ($user, $password) {
+                    $user->forceFill([
+                        'password' => Hash::make($password)
+                    ])->setRememberToken(Str::random(60));
+
+                    $user->save();
+
+                    event(new PasswordReset($user));
+                }
+            );
+
+            if ($status === Password::PASSWORD_RESET) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Mật khẩu đã được đặt lại thành công',
+                    'success' => true,
+                    'remark' => 'Password has been reset successfully'
+                ]);
+            }
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn',
+                'success' => false,
+                'remark' => 'Invalid or expired password reset token'
+            ], 400);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Không thể đặt lại mật khẩu. Vui lòng thử lại sau',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Change password for authenticated user
+     */
+    public function changePassword(Request $request)
+    {
+        try {
+            $request->validate([
+                'current_password' => 'required',
+                'password' => 'required|min:8|confirmed'
+            ]);
+
+            $user = $request->user();
+
+            // Check if current password is correct
+            if (!Hash::check($request->current_password, $user->password)) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Mật khẩu hiện tại không đúng',
+                    'success' => false,
+                    'remark' => 'Current password is incorrect'
+                ], 401);
+            }
+
+            // Check if new password is different from current password
+            if (Hash::check($request->password, $user->password)) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Mật khẩu mới phải khác mật khẩu hiện tại',
+                    'success' => false,
+                    'remark' => 'New password must be different from current password'
+                ], 422);
+            }
+
+            // Update password
+            $user->password = Hash::make($request->password);
+            $user->save();
+
+            // Revoke all tokens for security
+            $user->tokens()->delete();
+
+            return response()->json([
+                'data' => null,
+                'message' => 'Mật khẩu đã được thay đổi thành công. Vui lòng đăng nhập lại',
+                'success' => true,
+                'remark' => 'Password changed successfully. Please login again'
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Không thể thay đổi mật khẩu. Vui lòng thử lại sau',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
     }
 }

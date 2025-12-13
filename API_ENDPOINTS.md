@@ -3,9 +3,12 @@
 ## Authentication
 ```
 POST   /api/login                    - User login
-POST   /api/register                 - User registration
-GET    /api/user                     - Get current user
-POST   /api/logout                   - Logout user
+POST   /api/register                 - User registration (Disabled)
+GET    /api/user                     - Get current user (Protected)
+POST   /api/logout                   - Logout user (Protected)
+POST   /api/forgot-password          - Request password reset link
+POST   /api/reset-password           - Reset password with token
+POST   /api/change-password          - Change password (Protected)
 ```
 
 ## Topics

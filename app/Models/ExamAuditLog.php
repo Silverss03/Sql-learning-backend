@@ -11,8 +11,6 @@ class ExamAuditLog extends Model
         'exam_id',
         'session_token',
         'event_type',
-        'details',
-        'logged_at'
     ];
 
     protected $casts = [

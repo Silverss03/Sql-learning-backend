@@ -105,10 +105,11 @@ class StudentRepository implements StudentRepositoryInterface
             ->get()
             ->map(function ($progress) {
                 return [
+                    'id' => $progress->id,
                     'chapter_exercise_id' => $progress->chapter_exercise_id,
                     'chapter_exercise_title' => $progress->chapterExercise->description ?? 'No title', 
                     'score' => $progress->score,
-                    'completed_at' => $progress->completed_at,
+                    'completed_at' => $progress->submitted_at,
                 ];
             });
     }

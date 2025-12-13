@@ -73,10 +73,19 @@ class AuthController extends Controller
 
             $user = User::where('email', $request->email)->first();
 
+            if ($user->is_active == false) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ Admin',
+                    'success' => false,
+                    'remark' => 'Your account has been deactivated'
+                ], 403);
+            }
+
             if (!$user || !Hash::check($request->password, $user->password)) {
                 return response()->json([
                     'data' => null,
-                    'message' => 'Invalid credentials',
+                    'message' => 'Email hoặc mật khẩu không đúng',
                     'success' => false,
                     'remark' => 'Email or password is incorrect'
                 ], 401);

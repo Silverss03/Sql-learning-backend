@@ -33,13 +33,6 @@ class TopicRepository implements TopicRepositoryInterface
     public function getChapterExercisesByTopic($topicId, $studentId)
     {
         return ChapterExercise::where('topic_id', $topicId)
-            ->leftJoin('student_chapter_exercise_progress', function ($join) use ($studentId) {
-                $join->on('chapter_exercises.id', '=', 'student_chapter_exercise_progress.chapter_exercise_id')
-                    ->where('student_chapter_exercise_progress.student_id', '=', $studentId);
-            })
-            ->select('chapter_exercises.*', 
-                    'student_chapter_exercise_progress.score',
-                    'student_chapter_exercise_progress.submitted_at')
             ->orderBy('chapter_exercises.id') 
             ->get();
     }

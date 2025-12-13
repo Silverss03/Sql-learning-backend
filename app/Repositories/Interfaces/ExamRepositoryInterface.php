@@ -10,4 +10,5 @@ interface ExamRepositoryInterface
     public function startExam($examId, $studentId, $deviceFingerprint);
     public function submitExam($examId, $studentId, $sessionToken, $deviceFingerprint, $score);
     public function updateExamStatus($examId, $isActive);
+    public function getExamHistoryByStudent($studentId);
 }

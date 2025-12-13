@@ -102,6 +102,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ============================================
     Route::prefix('exams')->group(function () {
         Route::get('/', [ExamController::class, 'index']);
+        Route::get('/history', [ExamController::class, 'getExamHistory']);
         Route::get('/{exam}', [ExamController::class, 'show']);
         Route::put('/{exam}', [ExamController::class, 'update']);
         Route::delete('/{exam}', [ExamController::class, 'destroy']);

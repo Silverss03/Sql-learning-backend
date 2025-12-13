@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\ExamAuditLog;
 use Illuminate\Http\Request;
 use App\Repositories\Interfaces\ExamRepositoryInterface;
 use App\Repositories\Interfaces\StudentRepositoryInterface;
@@ -129,6 +130,102 @@ class ExamController extends Controller
         }
     }
 
+    public function logAudit(Request $request)
+    {
+        try {
+            $request->validate([
+                'exam_id' => 'required|exists:exams,id',
+                'session_token' => 'required|string',
+                'event_type' => 'required|string',
+            ]);
+
+            $student = $this->studentRepository->findByUserId($request->user()->id);
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $progress = StudentExamProgress::where('student_id', $student->id)
+                ->where('exam_id', $request->exam_id)
+                ->where('session_token', $request->session_token)
+                ->first();
+
+            if (!$progress) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Exam progress not found',
+                    'success' => false,
+                    'remark' => 'No matching exam session for the student'
+                ], 404);
+            }
+
+            $auditLog = ExamAuditLog::create([
+                'student_id' => $student->id,
+                'exam_id' => $request->exam_id,
+                'session_token' => $request->session_token,
+                'event_type' => $request->event_type,
+            ]);
+
+            return response()->json([
+                'data' => $auditLog,
+                'message' => 'Audit log created successfully',
+                'success' => true,
+                'remark' => 'Exam audit event recorded'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Validation failed',
+                'success' => false,
+                'remark' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to create audit log',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function getExamHistory(Request $request)
+    {
+        try {
+            $student = $this->studentRepository->findByUserId($request->user()->id);
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Student not found',
+                    'success' => false,
+                    'remark' => 'No student record for the authenticated user'
+                ], 404);
+            }
+
+            $examHistory = $this->examRepository->getExamHistoryByStudent($student->id);
+
+            return response()->json([
+                'data' => $examHistory,
+                'message' => 'Exam history retrieved successfully',
+                'success' => true,
+                'remark' => 'All past exam attempts by the student'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve exam history',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function start(Request $request)
     {
         try {
@@ -168,11 +265,18 @@ class ExamController extends Controller
                 if ($existingProgress->is_completed) {
                     return response()->json([
                         'data' => null,
-                        'message' => 'Exam already completed',
+                        'message' => 'Sinh viên đã làm bài thi',
                         'success' => false,
                         'remark' => 'This exam has already been completed'
                     ], 403);
                 }
+                
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Sinh viên đã bắt đầu làm bài thi',
+                    'success' => false,
+                    'remark' => 'Student has already started this exam and cannot restart it'
+                ], 403);
             }
 
             $data = $this->examRepository->startExam(

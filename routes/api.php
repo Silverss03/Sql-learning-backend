@@ -10,6 +10,8 @@ use App\Http\Controllers\Api\QuestionController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AdminController;
+use App\Http\Controllers\Api\LessonExerciseController;
+use App\Http\Controllers\Api\ExamAuditLogController;
 
 /*
 |--------------------------------------------------------------------------
@@ -29,8 +31,6 @@ use App\Http\Controllers\Api\AdminController;
 // Authentication routes
 // Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
-Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
-Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
 // ============================================
 // PROTECTED ROUTES (Authentication Required)
@@ -43,7 +43,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // ============================================
     Route::get('/user', [AuthController::class, 'user']);
     Route::post('/logout', [AuthController::class, 'logout']);
-    Route::post('/change-password', [AuthController::class, 'changePassword']);
     Route::post('/user/avatar', [UserController::class, 'uploadAvatar']);
     
     // ============================================
@@ -61,9 +60,33 @@ Route::middleware('auth:sanctum')->group(function () {
     // ============================================
     Route::prefix('lessons')->group(function () {
         Route::get('/{lesson}/questions', [LessonController::class, 'getQuestions']);
-        Route::get('/{lesson}/exercise', [LessonController::class, 'getExercise']);
+        Route::get('/{lesson}/exercise', [LessonExerciseController::class, 'getByLesson']); // Updated to use LessonExerciseController
+    });
+
+    // ============================================
+    // LESSON EXERCISE ROUTES
+    // ============================================
+    Route::prefix('lesson-exercises')->group(function () {
+        // Student operations (protected by auth)
+        Route::get('/', [LessonExerciseController::class, 'index']);                    // Get all exercises
+        Route::get('/{id}', [LessonExerciseController::class, 'show']);                 // Get specific exercise
+        Route::get('/{id}/submission', [LessonExerciseController::class, 'getSubmission']); // Get student submission
+        Route::get('/{id}/history', [LessonExerciseController::class, 'getHistory']);   // Get submission history
+        Route::post('/submit', [LessonExerciseController::class, 'submit']);            // Submit exercise
+        
+        // Admin/Teacher operations
+        Route::post('/', [LessonExerciseController::class, 'store']);                   // Create exercise
+        Route::put('/{id}', [LessonExerciseController::class, 'update']);               // Update exercise
+        Route::delete('/{id}', [LessonExerciseController::class, 'destroy']);           // Delete exercise
+        Route::post('/{id}/activate', [LessonExerciseController::class, 'activate']);   // Activate exercise
+        Route::post('/{id}/deactivate', [LessonExerciseController::class, 'deactivate']); // Deactivate exercise
+        
+        // Statistics (Admin/Teacher only)
+        Route::get('/{id}/statistics', [LessonExerciseController::class, 'getStatistics']);     // Get statistics
+        Route::get('/{id}/completion-rate', [LessonExerciseController::class, 'getCompletionRate']); // Get completion rate
     });
     
+    // Legacy route for backward compatibility (will be deprecated)
     Route::post('/exercise/submit', [LessonController::class, 'submitExercise']);
 
     // ============================================
@@ -115,9 +138,23 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // ============================================
-    // AUDIT LOG ROUTES
+    // EXAM AUDIT LOG ROUTES
     // ============================================
-    Route::post('/audit-logs', [ExamController::class, 'logAudit']);    // ============================================
+    Route::prefix('exam-audit-logs')->group(function () {
+        // Student: Log tab switch event
+        Route::post('/', [ExamAuditLogController::class, 'store']);
+        
+        // Admin/Teacher: View logs
+        Route::get('/exam/{examId}', [ExamAuditLogController::class, 'getByExam']);
+        Route::get('/student/{studentId}', [ExamAuditLogController::class, 'getByStudent']);
+        Route::get('/session/{sessionToken}', [ExamAuditLogController::class, 'getBySession']);
+        Route::get('/session/{sessionToken}/count', [ExamAuditLogController::class, 'getTabSwitchCount']);
+    });
+    
+    // Legacy audit log route (for backward compatibility - will be deprecated)
+    Route::post('/audit-logs', [ExamController::class, 'logAudit']);
+
+    // ============================================
     // ADMIN ROUTES
     // ============================================
     Route::prefix('admin')->group(function () {

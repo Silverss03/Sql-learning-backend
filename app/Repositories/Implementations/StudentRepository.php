@@ -35,6 +35,12 @@ class StudentRepository implements StudentRepositoryInterface
             ) as max_scores
         ', [$studentId, $studentId, $studentId])[0]->average_score ?? 0;
 
+        $roundedScore = round($averageScore, 2);
+
+        Student::where('id', $studentId)->update([
+            'avg_score' => $roundedScore
+        ]);
+
         return [
             'student_id' => $studentId,
             'average_score' => round($averageScore, 2)

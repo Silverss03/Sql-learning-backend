@@ -12,7 +12,57 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Repository bindings
+        $this->app->bind(
+            \App\Repositories\Interfaces\TopicRepositoryInterface::class,
+            \App\Repositories\Implementations\TopicRepository::class
+        );
+
+        $this->app->bind(
+            \App\Repositories\Interfaces\LessonRepositoryInterface::class,
+            \App\Repositories\Implementations\LessonRepository::class
+        );
+
+        $this->app->bind(
+            \App\Repositories\Interfaces\StudentRepositoryInterface::class,
+            \App\Repositories\Implementations\StudentRepository::class
+        );
+
+        $this->app->bind(
+            \App\Repositories\Interfaces\ExamRepositoryInterface::class,
+            \App\Repositories\Implementations\ExamRepository::class
+        );
+
+        $this->app->bind(
+            \App\Repositories\Interfaces\ChapterExerciseRepositoryInterface::class,
+            \App\Repositories\Implementations\ChapterExerciseRepository::class
+        );
+
+        $this->app->bind(
+            \App\Repositories\Interfaces\QuestionRepositoryInterface::class,
+            \App\Repositories\Implementations\QuestionRepository::class
+        );
+
+        $this->app->bind(
+            \App\Repositories\Interfaces\FlashcardRepositoryInterface::class,
+            \App\Repositories\Implementations\FlashcardRepository::class
+        );
+        
+        $this->app->bind(
+            \App\Repositories\Interfaces\TeacherRepositoryInterface::class,
+            \App\Repositories\Implementations\TeacherRepository::class
+        );
+
+        $this->app->bind(
+            \App\Repositories\Interfaces\LessonExerciseRepositoryInterface::class,
+            \App\Repositories\Implementations\LessonExerciseRepository::class
+        );
+
+        $this->app->bind(
+            \App\Repositories\Interfaces\ExamAuditLogRepositoryInterface::class,
+            \App\Repositories\Implementations\ExamAuditLogRepository::class
+        );
+
     }
 
     /**

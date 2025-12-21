@@ -9,6 +9,10 @@ interface LessonRepositoryInterface
     public function getExerciseByLesson($lessonId);
     public function submitExercise($studentId, $lessonExerciseId, $score);
     
+    // List and detail methods
+    public function getAll($filters = []);
+    public function getByIdWithDetails($id);
+    
     // Admin CRUD operations
     public function create(array $data);
     public function update($id, array $data);

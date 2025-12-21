@@ -1284,5 +1284,30 @@ class AdminController extends Controller
         }
     }
 
+    public function getClass(Request $request, ClassModel $classModel)
+    {
+        $adminCheck = $this->verifyAdmin($request);
+        if ($adminCheck instanceof \Illuminate\Http\JsonResponse) {
+            return $adminCheck;
+        }
+
+        try {
+            return response()->json([
+                'data' => $classModel->load('teacher.user'),
+                'message' => 'Class retrieved successfully',
+                'success' => true,
+                'remark' => 'Class details with teacher information'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve class',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     // ==========================================
 }

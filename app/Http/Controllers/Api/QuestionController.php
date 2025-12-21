@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Repositories\Interfaces\QuestionRepositoryInterface;
 use App\Models\Teacher;
+use App\Models\Admin;
 use App\Models\ClassModel;
 use Illuminate\Support\Facades\Validator;
 
@@ -27,13 +28,14 @@ class QuestionController extends Controller
             // Verify teacher authorization
             $user = $request->user();
             $teacher = Teacher::where('user_id', $user->id)->first();
+            $admin = Admin::where('user_id', $user->id)->first();
 
-            if (!$teacher) {
+            if (!$teacher && !$admin) {
                 return response()->json([
                     'data' => null,
                     'message' => 'Unauthorized',
                     'success' => false,
-                    'remark' => 'Only teachers can create exercises and questions'
+                    'remark' => 'Only teachers and admins can create exercises and questions'
                 ], 403);
             }
 
@@ -78,9 +80,9 @@ class QuestionController extends Controller
             // For exams, verify teacher owns the class
             if ($request->exercise_type === 'exam') {
                 $class = ClassModel::where('id', $request->class_id)
-                    ->where('teacher_id', $teacher->id)
-                    ->first();
-
+                ->where('teacher_id', $teacher->id)
+                ->first();
+                
                 if (!$class) {
                     return response()->json([
                         'data' => null,
@@ -90,13 +92,14 @@ class QuestionController extends Controller
                     ], 403);
                 }
             }
-
+            $teacherId = ($request->exercise_type === 'exam' && $teacher) ? $teacher->id : null;
+            
             // Prepare data for repository
             $data = [
                 'exercise_type' => $request->exercise_type,
                 'parent_id' => $request->parent_id,
-                'teacher_id' => $teacher->id,
-                'created_by' => $teacher->user_id,
+                'teacher_id' => $teacherId,
+                'created_by' => $user->id,
                 'questions' => $request->questions,
             ];
 

@@ -79,7 +79,7 @@ class LessonExerciseRepository implements LessonExerciseRepositoryInterface
                 },
                 'questions' => function($query) {
                     $query->where('is_active', true)
-                          ->select('id', 'lesson_exercise_id', 'question_type', 'question_text', 'correct_answer', 'point', 'is_active');
+                          ->select('id', 'lesson_exercise_id', 'question_type', 'question_title', 'is_active');
                 }
             ])
             ->find($exerciseId);

@@ -11,6 +11,7 @@ use App\Models\InteractiveSqlQuestion;
 use App\Repositories\Interfaces\QuestionRepositoryInterface;
 use Illuminate\Support\Facades\DB;
 use App\Models\ClassModel;
+use App\Events\ExamCreated;
 
 class QuestionRepository implements QuestionRepositoryInterface
 {
@@ -100,7 +101,7 @@ class QuestionRepository implements QuestionRepositoryInterface
                     throw new \Exception('Unauthorized: You can only create exams for your own classes');
                 }
 
-                return Exam::create([
+                $exam = Exam::create([
                     'title' => $data['exam_title'] ?? 'Untitled Exam',
                     'description' => $data['exam_description'] ?? null,
                     'duration_minutes' => $data['exam_duration_minutes'] ?? 60,
@@ -108,8 +109,12 @@ class QuestionRepository implements QuestionRepositoryInterface
                     'end_time' => $data['exam_end_time'] ?? now()->addHours(2),
                     'is_active' => false,
                     'created_by' => $data['created_by'],
-                    'class_id' => $data['class_id']
+                    'class_id' => $data['class_id'],
                 ]);
+
+                event(new ExamCreated($exam));
+
+                return $exam;
 
             default:
                 throw new \Exception('Invalid exercise type');

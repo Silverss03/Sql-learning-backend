@@ -115,4 +115,42 @@ class LessonRepository implements LessonRepositoryInterface
     {
         return Lesson::find($id);
     }
+
+    public function getAll($filters = [])
+    {
+        $query = Lesson::with(['topic', 'lessonExercises'])->where('is_active', true);
+
+        // Filter by topic_id if provided
+        if (isset($filters['topic_id'])) {
+            $query->where('topic_id', $filters['topic_id']);
+        }
+
+        // Order by order_index
+        $query->orderBy('order_index', 'asc');
+
+        return $query->get();
+    }
+
+    public function getByIdWithDetails($id)
+    {
+        $lesson = Lesson::with([
+            'topic',
+            'lessonExercises' => function ($query) {
+                $query->where('is_active', true)
+                      ->with(['questions' => function ($q) {
+                          $q->where('is_active', true)
+                            ->with(['multipleChoice', 'interactiveSqlQuestion'])
+                            ->orderBy('order_index');
+                      }]);
+            }
+        ])
+        ->where('is_active', true)
+        ->find($id);
+
+        if (!$lesson) {
+            return null;
+        }
+
+        return $lesson;
+    }
 }

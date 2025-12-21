@@ -59,16 +59,16 @@ class LessonExerciseController extends Controller
     public function show(Request $request, $id)
     {
         try {
-            $student = $this->studentRepository->findByUserId($request->user()->id);
+            // $student = $this->studentRepository->findByUserId($request->user()->id);
 
-            if (!$student) {
-                return response()->json([
-                    'data' => null,
-                    'message' => 'Student not found',
-                    'success' => false,
-                    'remark' => 'No student record for the authenticated user'
-                ], 404);
-            }
+            // if (!$student) {
+            //     return response()->json([
+            //         'data' => null,
+            //         'message' => 'Student not found',
+            //         'success' => false,
+            //         'remark' => 'No student record for the authenticated user'
+            //     ], 404);
+            // }
 
             $exercise = $this->lessonExerciseRepository->getExerciseWithQuestions($id);
 

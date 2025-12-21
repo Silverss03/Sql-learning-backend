@@ -78,4 +78,9 @@ class ChapterExerciseRepository implements ChapterExerciseRepositoryInterface
             'submitted_at' => now(),
         ]);
     }
+
+    public function getAllExercises()
+    {
+        return ChapterExercise::all();
+    }
 }

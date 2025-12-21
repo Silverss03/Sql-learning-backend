@@ -246,4 +246,25 @@ class ChapterExerciseController extends Controller
             ], 500);
         }
     }
+
+    public function index()
+    {
+        try {
+            $chapterExercises = $this->chapterExerciseRepository->getAllExercises();
+
+            return response()->json([
+                'data' => $chapterExercises,
+                'message' => 'Chapter exercises retrieved successfully',
+                'success' => true,
+                'remark' => 'List of all chapter exercises with topics'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve chapter exercises',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
 }

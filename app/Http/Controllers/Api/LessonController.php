@@ -20,6 +20,70 @@ class LessonController extends Controller
         $this->studentRepository = $studentRepository;
     }
 
+    /**
+     * Get all lessons (optionally filtered by topic)
+     */
+    public function index(Request $request)
+    {
+        try {
+            $filters = [];
+            
+            // Add topic filter if provided
+            if ($request->has('topic_id')) {
+                $filters['topic_id'] = $request->topic_id;
+            }
+
+            $lessons = $this->lessonRepository->getAll($filters);
+
+            return response()->json([
+                'data' => $lessons,
+                'message' => 'Lessons retrieved successfully',
+                'success' => true,
+                'remark' => 'All active lessons' . (isset($filters['topic_id']) ? ' for the specified topic' : '')
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve lessons',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get lesson details with exercises and questions
+     */
+    public function show($id)
+    {
+        try {
+            $lesson = $this->lessonRepository->getByIdWithDetails($id);
+
+            if (!$lesson) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Lesson not found or inactive',
+                    'success' => false,
+                    'remark' => 'The requested lesson is not available'
+                ], 404);
+            }
+
+            return response()->json([
+                'data' => $lesson,
+                'message' => 'Lesson details retrieved successfully',
+                'success' => true,
+                'remark' => 'Lesson with topic, exercises, and questions'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => null,
+                'message' => 'Failed to retrieve lesson details',
+                'success' => false,
+                'remark' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function getQuestions($lessonId)
     {
         try {

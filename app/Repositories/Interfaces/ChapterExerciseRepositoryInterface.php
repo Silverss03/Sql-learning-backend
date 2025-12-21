@@ -10,4 +10,5 @@ interface ChapterExerciseRepositoryInterface
     public function delete($id);
     public function getWithQuestions($id);
     public function submitExercise($studentId, $chapterExerciseId, $score);
+    public function getAllExercises();
 }

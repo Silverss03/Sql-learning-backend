@@ -71,3 +71,6 @@ coverage/
 # Misc
 .env.backup
 .env.example.local
+
+*.md
+firebasekey.json

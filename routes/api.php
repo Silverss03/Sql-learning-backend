@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\LessonExerciseController;
 use App\Http\Controllers\Api\ExamAuditLogController;
+use App\Http\Controllers\Api\DeviceTokenController;
 
 /*
 |--------------------------------------------------------------------------
@@ -59,7 +60,16 @@ Route::middleware('auth:sanctum')->group(function () {
     // LESSON ROUTES
     // ============================================
     Route::prefix('lessons')->group(function () {
+        // Get all lessons (optionally filtered by topic_id)
+        Route::get('/', [LessonController::class, 'index']);
+        
+        // Get lesson details with exercises and questions
+        Route::get('/{lesson}', [LessonController::class, 'show']);
+        
+        // Get questions for a lesson (legacy)
         Route::get('/{lesson}/questions', [LessonController::class, 'getQuestions']);
+        
+        // Get exercise for a lesson (legacy)
         Route::get('/{lesson}/exercise', [LessonExerciseController::class, 'getByLesson']); // Updated to use LessonExerciseController
     });
 
@@ -105,6 +115,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // CHAPTER EXERCISE ROUTES
     // ============================================
     Route::prefix('chapter-exercises')->group(function () {
+        Route::get('/', [ChapterExerciseController::class, 'index']);
         Route::post('/', [ChapterExerciseController::class, 'store']);
         Route::get('/{chapterExercise}', [ChapterExerciseController::class, 'show']);
         Route::put('/{chapterExercise}', [ChapterExerciseController::class, 'update']);
@@ -155,6 +166,26 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/audit-logs', [ExamController::class, 'logAudit']);
 
     // ============================================
+    // DEVICE TOKEN & NOTIFICATION ROUTES
+    // ============================================
+    Route::prefix('users/device-token')->group(function () {
+        // Register/Update device token
+        Route::post('/', [DeviceTokenController::class, 'store']);
+        
+        // Get all device tokens for user
+        Route::get('/', [DeviceTokenController::class, 'index']);
+        
+        // Delete device token by ID
+        Route::delete('/{id}', [DeviceTokenController::class, 'destroy']);
+        
+        // Delete device token by token string (for logout)
+        Route::delete('/by-token', [DeviceTokenController::class, 'deleteByToken']);
+        
+        // Test notification (for debugging)
+        Route::post('/test-notification', [DeviceTokenController::class, 'testNotification']);
+    });
+
+    // ============================================
     // ADMIN ROUTES
     // ============================================
     Route::prefix('admin')->group(function () {
@@ -170,6 +201,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/classes', [AdminController::class, 'createClass']);
         Route::post('/classes/bulk', [AdminController::class, 'bulkCreateClasses']);
         Route::get('/classes', [AdminController::class, 'getClasses']);
+        Route::get('/classes/{classModel}', [AdminController::class, 'getClass']);
         Route::put('/classes/{classModel}', [AdminController::class, 'updateClass']);
         Route::delete('/classes/{classModel}', [AdminController::class, 'deleteClass']);
         Route::post('/classes/batch-delete', [AdminController::class, 'batchDeleteClasses']);

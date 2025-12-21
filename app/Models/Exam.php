@@ -56,4 +56,9 @@ class Exam extends Model{
     {
         return $this->belongsTo(ClassModel::class, 'class_id');
     }
+
+    public function pushNotifications()
+    {
+        return $this->hasMany(PushNotification::class);
+    }
 }

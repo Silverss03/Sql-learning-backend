@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'firebase' => [
+        'credentials' => env('FIREBASE_CREDENTIALS', base_path('firebasekey.json')),
+        'project_id' => env('FIREBASE_PROJECT_ID', 'sqlearn-65267'),
+    ],
+
 ];

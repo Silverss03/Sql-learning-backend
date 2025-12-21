@@ -42,11 +42,6 @@ class AppServiceProvider extends ServiceProvider
             \App\Repositories\Interfaces\QuestionRepositoryInterface::class,
             \App\Repositories\Implementations\QuestionRepository::class
         );
-
-        $this->app->bind(
-            \App\Repositories\Interfaces\FlashcardRepositoryInterface::class,
-            \App\Repositories\Implementations\FlashcardRepository::class
-        );
         
         $this->app->bind(
             \App\Repositories\Interfaces\TeacherRepositoryInterface::class,
@@ -70,6 +65,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Event listeners are auto-discovered by Laravel
+        // No manual registration needed for listeners in app/Listeners folder
+        
         try {
             Storage::extend('google', function($app, $config) {
                 $options = [];

@@ -235,34 +235,75 @@ class AuthController extends Controller
                 'password' => 'required|min:8|confirmed'
             ]);
 
-            $status = Password::reset(
-                $request->only('email', 'password', 'password_confirmation', 'token'),
-                function ($user, $password) {
-                    $user->forceFill([
-                        'password' => Hash::make($password)
-                    ])->setRememberToken(Str::random(60));
+            // Check if reset token exists and is valid
+            $resetRecord = DB::table('password_reset_tokens')
+                ->where('email', $request->email)
+                ->first();
 
-                    $user->save();
-
-                    event(new PasswordReset($user));
-                }
-            );
-
-            if ($status === Password::PASSWORD_RESET) {
+            if (!$resetRecord) {
                 return response()->json([
                     'data' => null,
-                    'message' => 'Mật khẩu đã được đặt lại thành công',
-                    'success' => true,
-                    'remark' => 'Password has been reset successfully'
-                ]);
+                    'message' => 'Không tìm thấy yêu cầu đặt lại mật khẩu cho email này',
+                    'success' => false,
+                    'remark' => 'No password reset request found for this email'
+                ], 404);
             }
+
+            // Verify token
+            if (!Hash::check($request->token, $resetRecord->token)) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Mã xác thực không đúng',
+                    'success' => false,
+                    'remark' => 'Invalid verification code'
+                ], 400);
+            }
+
+            // Check if token is expired (15 minutes)
+            $createdAt = \Carbon\Carbon::parse($resetRecord->created_at);
+            if ($createdAt->addMinutes(15)->isPast()) {
+                // Delete expired token
+                DB::table('password_reset_tokens')
+                    ->where('email', $request->email)
+                    ->delete();
+
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Mã xác thực đã hết hạn. Vui lòng yêu cầu mã mới',
+                    'success' => false,
+                    'remark' => 'Verification code has expired. Please request a new one'
+                ], 400);
+            }
+
+            // Find user
+            $user = User::where('email', $request->email)->first();
+
+            if (!$user) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'Không tìm thấy tài khoản với email này',
+                    'success' => false,
+                    'remark' => 'User with this email does not exist'
+                ], 404);
+            }
+
+            // Update password
+            $user->password = Hash::make($request->password);
+            $user->setRememberToken(Str::random(60));
+            $user->save();
+
+            // Delete the reset token
+            DB::table('password_reset_tokens')
+                ->where('email', $request->email)
+                ->delete();
+
 
             return response()->json([
                 'data' => null,
-                'message' => 'Link đặt lại mật khẩu không hợp lệ hoặc đã hết hạn',
-                'success' => false,
-                'remark' => 'Invalid or expired password reset token'
-            ], 400);
+                'message' => 'Mật khẩu đã được đặt lại thành công',
+                'success' => true,
+                'remark' => 'Password has been reset successfully'
+            ]);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([

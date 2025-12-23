@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\LessonExerciseController;
 use App\Http\Controllers\Api\ExamAuditLogController;
 use App\Http\Controllers\Api\DeviceTokenController;
+use App\Http\Controllers\Api\NotificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -32,6 +33,8 @@ use App\Http\Controllers\Api\DeviceTokenController;
 // Authentication routes
 // Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 
 // ============================================
 // PROTECTED ROUTES (Authentication Required)
@@ -44,6 +47,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ============================================
     Route::get('/user', [AuthController::class, 'user']);
     Route::post('/logout', [AuthController::class, 'logout']);
+    Route::post('/change-password', [AuthController::class, 'changePassword']);
     Route::post('/user/avatar', [UserController::class, 'uploadAvatar']);
     
     // ============================================
@@ -183,6 +187,42 @@ Route::middleware('auth:sanctum')->group(function () {
         
         // Test notification (for debugging)
         Route::post('/test-notification', [DeviceTokenController::class, 'testNotification']);
+    });
+
+    // ============================================
+    // NOTIFICATION ROUTES
+    // ============================================
+    // NOTIFICATION ROUTES
+    // ============================================
+    Route::prefix('notifications')->group(function () {
+        // Get all notifications for authenticated user (with filters and pagination)
+        Route::get('/', [NotificationController::class, 'index']);
+        
+        // Get notification statistics
+        Route::get('/statistics', [NotificationController::class, 'statistics']);
+        
+        // Get unread notification count
+        Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        
+        // Get a single notification
+        Route::get('/{id}', [NotificationController::class, 'show']);
+        
+        // Mark notification as read
+        Route::post('/{id}/mark-as-read', [NotificationController::class, 'markAsRead']);
+        
+        // Mark multiple notifications as read
+        Route::post('/mark-multiple-as-read', [NotificationController::class, 'markMultipleAsRead']);
+        // Mark all notifications as read
+        Route::post('/mark-as-read', [NotificationController::class, 'markAllAsRead']);
+        
+        // Delete a single notification
+        Route::delete('/{id}', [NotificationController::class, 'destroy']);
+        
+        // Delete multiple notifications
+        Route::delete('/', [NotificationController::class, 'destroyMultiple']);
+        
+        // Clear all notifications
+        Route::post('/clear-all', [NotificationController::class, 'clearAll']);
     });
 
     // ============================================

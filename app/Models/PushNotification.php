@@ -14,6 +14,8 @@ class PushNotification extends Model
         'data',
         'type',
         'status',
+        'is_read',
+        'read_at',
         'recipients_count',
         'success_count',
         'failed_count',
@@ -23,8 +25,18 @@ class PushNotification extends Model
 
     protected $casts = [
         'data' => 'array',
+        'is_read' => 'boolean',
         'sent_at' => 'datetime',
+        'read_at' => 'datetime',
     ];
+
+    /**
+     * Prepare dates for serialization (convert to app timezone)
+     */
+    protected function serializeDate(\DateTimeInterface $date): string
+    {
+        return \DateTime::createFromInterface($date)->setTimezone(new \DateTimeZone(config('app.timezone')))->format('Y-m-d H:i:s');
+    }
 
     public function user()
     {
@@ -55,6 +67,28 @@ class PushNotification extends Model
         $this->update([
             'status' => 'failed',
             'error_message' => $errorMessage,
+        ]);
+    }
+
+    /**
+     * Mark notification as read
+     */
+    public function markAsRead()
+    {
+        $this->update([
+            'is_read' => true,
+            'read_at' => now(),
+        ]);
+    }
+
+    /**
+     * Mark notification as unread
+     */
+    public function markAsUnread()
+    {
+        $this->update([
+            'is_read' => false,
+            'read_at' => null,
         ]);
     }
 

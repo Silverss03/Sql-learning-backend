@@ -157,48 +157,56 @@ class FirebaseNotificationService
             'click_action' => 'OPEN_EXAM',
         ];
 
-        // Get all active device tokens for students in this class
-        $deviceTokens = DeviceToken::whereHas('student', function ($query) use ($classId) {
-            $query->where('class_id', $classId);
-        })
-        ->where('is_active', true)
-        ->pluck('device_token')
-        ->toArray();
+        // 1. Fetch active device tokens for students in the class
+        $deviceTokensData = DeviceToken::whereHas('student', function ($query) use ($classId) {
+                $query->where('class_id', $classId);
+            })
+            ->where('is_active', true)
+            ->select('user_id', 'device_token') // Select specific columns for speed
+            ->get();
 
-        if (empty($deviceTokens)) {
-            Log::info("No active devices found for class {$classId}");
-            return [
-                'success' => 0,
-                'failed' => 0,
-                'recipients_count' => 0,
-            ];
+        if ($deviceTokensData->isEmpty()) {
+            return ['success' => 0, 'recipients_count' => 0];
         }
 
-        // Create notification record
-        $notification = PushNotification::create([
-            'exam_id' => $examId,
-            'title' => $title,
-            'body' => $body,
-            'data' => $data,
-            'type' => 'exam_created',
-            'recipients_count' => count($deviceTokens),
-        ]);
+        // 2. Extract plain tokens for Firebase
+        $deviceTokens = $deviceTokensData->pluck('device_token')->toArray();
 
-        // Send notifications
+        // 3. Send Notifications FIRST (Batch Send)
         $result = $this->sendToMultipleDevices($deviceTokens, $title, $body, $data);
 
-        // Update notification stats
-        $notification->updateStats($result['success'], $result['failed']);
+        // 4. Prepare data for BULK INSERT
+        // We get unique user_ids so we don't spam the database if a user has 2 phones
+        $uniqueUserIds = $deviceTokensData->pluck('user_id')->unique();
         
-        if ($result['failed'] > 0) {
-            $notification->markAsFailed("Failed to send to {$result['failed']} devices");
-        } else {
-            $notification->markAsSent();
+        $now = now(); // Timestamp for bulk insert
+        $notificationsToInsert = [];
+
+        foreach ($uniqueUserIds as $userId) {
+            if ($userId) {
+                $notificationsToInsert[] = [
+                    'user_id' => $userId,
+                    'exam_id' => $examId,
+                    'title' => $title,
+                    'body' => $body,
+                    'data' => json_encode($data),
+                    'type' => 'exam_created',
+                    'status' => 'sent',
+                    'recipients_count' => 1,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
+        }
+
+        // 5. Run ONE single database query to insert all records
+        if (!empty($notificationsToInsert)) {
+            PushNotification::insert($notificationsToInsert);
         }
 
         return array_merge($result, [
             'recipients_count' => count($deviceTokens),
-            'notification_id' => $notification->id,
+            'notification_records_created' => count($notificationsToInsert),
         ]);
     }
 

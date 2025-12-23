@@ -22,6 +22,14 @@ class Exam extends Model{
         'is_active' => 'boolean',
     ];
 
+    /**
+     * Prepare dates for serialization (convert to app timezone)
+     */
+    protected function serializeDate(\DateTimeInterface $date): string
+    {
+        return \DateTime::createFromInterface($date)->setTimezone(new \DateTimeZone(config('app.timezone')))->format('Y-m-d H:i:s');
+    }
+
     public function topic()
     {
         return $this->belongsTo(Topic::class);

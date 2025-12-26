@@ -6,24 +6,36 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Repositories\Interfaces\TopicRepositoryInterface;
 use App\Repositories\Interfaces\StudentRepositoryInterface;
+use App\Services\RedisCacheService;
+use Illuminate\Support\Facades\Cache;
 
 class TopicController extends Controller
 {
     protected $topicRepository;
     protected $studentRepository;
+    protected $cache;
 
     public function __construct(
         TopicRepositoryInterface $topicRepository,
-        StudentRepositoryInterface $studentRepository
+        StudentRepositoryInterface $studentRepository,
+        RedisCacheService $cache
     ) {
         $this->topicRepository = $topicRepository;
         $this->studentRepository = $studentRepository;
+        $this->cache = $cache;
     }
 
     public function index()
     {
         try {
-            $topics = $this->topicRepository->getAllActive();
+            // Cache all active topics for 1 hour (topics rarely change)
+            $topics = Cache::remember(
+                'topics:all:active',
+                RedisCacheService::CACHE_LONG,
+                function () {
+                    return $this->topicRepository->getAllActive();
+                }
+            );
         
             return response()->json([
                 'data' => $topics,
@@ -44,7 +56,14 @@ class TopicController extends Controller
     public function getLessons($topicId)
     {
         try {
-            $lessons = $this->topicRepository->getLessonsByTopic($topicId);
+            // Cache lessons by topic for 1 hour
+            $lessons = Cache::remember(
+                "topics:{$topicId}:lessons",
+                RedisCacheService::CACHE_LONG,
+                function () use ($topicId) {
+                    return $this->topicRepository->getLessonsByTopic($topicId);
+                }
+            );
 
             if ($lessons === null) {
                 return response()->json([
@@ -85,7 +104,14 @@ class TopicController extends Controller
                 ], 404);
             }
 
-            $exercises = $this->topicRepository->getChapterExercisesByTopic($topicId, $student->id);
+            // Cache chapter exercises with student progress for 15 minutes
+            $exercises = Cache::remember(
+                "topics:{$topicId}:chapter_exercises:student:{$student->id}",
+                RedisCacheService::CACHE_SHORT,
+                function () use ($topicId, $student) {
+                    return $this->topicRepository->getChapterExercisesByTopic($topicId, $student->id);
+                }
+            );
 
             return response()->json([
                 'data' => $exercises,
@@ -117,18 +143,14 @@ class TopicController extends Controller
                 ], 404);
             }
 
-            $progress = $this->topicRepository->getTopicProgress($topicId, $student->id);
-
-            if (!$student) {
-                return response()->json([
-                    'data' => null,
-                    'message' => 'Student not found',
-                    'success' => false,
-                    'remark' => 'No student record associated with the given user ID'
-                ], 404);
-            }
-
-            $progress = $this->topicRepository->getTopicProgress($topicId, $student->id);
+            // Cache topic progress for 15 minutes
+            $progress = Cache::remember(
+                "topics:{$topicId}:progress:student:{$student->id}",
+                RedisCacheService::CACHE_SHORT,
+                function () use ($topicId, $student) {
+                    return $this->topicRepository->getTopicProgress($topicId, $student->id);
+                }
+            );
 
             if ($progress === null) {
                 return response()->json([

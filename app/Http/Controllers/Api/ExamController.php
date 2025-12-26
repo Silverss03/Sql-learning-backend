@@ -9,18 +9,23 @@ use App\Repositories\Interfaces\ExamRepositoryInterface;
 use App\Repositories\Interfaces\StudentRepositoryInterface;
 use App\Models\Teacher;
 use App\Models\StudentExamProgress;
+use App\Services\RedisCacheService;
+use Illuminate\Support\Facades\Cache;
 
 class ExamController extends Controller
 {
     protected $examRepository;
     protected $studentRepository;
+    protected $cache;
 
     public function __construct(
         ExamRepositoryInterface $examRepository,
-        StudentRepositoryInterface $studentRepository
+        StudentRepositoryInterface $studentRepository,
+        RedisCacheService $cache
     ) {
         $this->examRepository = $examRepository;
         $this->studentRepository = $studentRepository;
+        $this->cache = $cache;
     }
 
     public function index(Request $request)
@@ -37,7 +42,14 @@ class ExamController extends Controller
                 ], 404);
             }
 
-            $exams = $this->examRepository->getFutureExamsByClass($student->class_id);
+            // Cache future exams for 15 minutes (as exam schedules can change)
+            $exams = Cache::remember(
+                "exams:class:{$student->class_id}:future",
+                RedisCacheService::CACHE_SHORT,
+                function () use ($student) {
+                    return $this->examRepository->getFutureExamsByClass($student->class_id);
+                }
+            );
 
             return response()->json([
                 'data' => $exams,
@@ -69,7 +81,14 @@ class ExamController extends Controller
                 ], 404);
             }
 
-            $exam = $this->examRepository->findById($examId);
+            // Cache exam details with lock to prevent stampede when 100+ students start exam simultaneously
+            $exam = $this->cache->rememberWithLock(
+                "exams:{$examId}:details",
+                RedisCacheService::CACHE_MEDIUM,
+                function () use ($examId) {
+                    return $this->examRepository->findById($examId);
+                }
+            );
 
             if (!$exam) {
                 return response()->json([
@@ -112,7 +131,14 @@ class ExamController extends Controller
                 ], 403);
             }
 
-            $data = $this->examRepository->getExamWithQuestions($examId);
+            // Cache exam with questions using lock (HIGH RISK: all students query same exam at start time)
+            $data = $this->cache->rememberWithLock(
+                "exams:{$examId}:questions",
+                RedisCacheService::CACHE_MEDIUM,
+                function () use ($examId) {
+                    return $this->examRepository->getExamWithQuestions($examId);
+                }
+            );
 
             return response()->json([
                 'data' => $data,
@@ -208,7 +234,14 @@ class ExamController extends Controller
                 ], 404);
             }
 
-            $examHistory = $this->examRepository->getExamHistoryByStudent($student->id);
+            // Cache exam history for 10 minutes
+            $examHistory = Cache::remember(
+                "students:{$student->id}:exam_history",
+                600, // 10 minutes
+                function () use ($student) {
+                    return $this->examRepository->getExamHistoryByStudent($student->id);
+                }
+            );
 
             return response()->json([
                 'data' => $examHistory,
@@ -346,6 +379,10 @@ class ExamController extends Controller
                 ], 403);
             }
 
+            // Clear student caches after exam submission
+            $this->cache->clearStudentCache($student->id);
+            Cache::forget("students:{$student->id}:exam_history");
+
             if ($result['has_violations']) {
                 return response()->json([
                     'data' => null,
@@ -415,6 +452,11 @@ class ExamController extends Controller
 
             $exam = $this->examRepository->updateExamStatus($examId, true);
 
+            // Clear exam caches after activation
+            Cache::forget("exams:{$examId}:details");
+            Cache::forget("exams:{$examId}:questions");
+            Cache::forget("exams:class:{$exam->class_id}:future");
+
             return response()->json([
                 'data' => $exam,
                 'message' => 'Exam started successfully',
@@ -467,6 +509,11 @@ class ExamController extends Controller
 
             $exam->update($request->only(['title', 'description', 'duration_minutes', 'start_time', 'end_time', 'is_active']));
 
+            // Clear exam caches after update
+            Cache::forget("exams:{$examId}:details");
+            Cache::forget("exams:{$examId}:questions");
+            Cache::forget("exams:class:{$exam->class_id}:future");
+
             return response()->json([
                 'data' => $exam,
                 'message' => 'Exam updated successfully',
@@ -515,7 +562,13 @@ class ExamController extends Controller
                 ], 404);
             }
 
+            $classId = $exam->class_id;
             $exam->delete();
+
+            // Clear exam caches after deletion
+            Cache::forget("exams:{$examId}:details");
+            Cache::forget("exams:{$examId}:questions");
+            Cache::forget("exams:class:{$classId}:future");
 
             return response()->json([
                 'data' => null,

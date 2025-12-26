@@ -6,18 +6,23 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Repositories\Interfaces\LessonRepositoryInterface;
 use App\Repositories\Interfaces\StudentRepositoryInterface;
+use App\Services\RedisCacheService;
+use Illuminate\Support\Facades\Cache;
 
 class LessonController extends Controller
 {
     protected $lessonRepository;
     protected $studentRepository;
+    protected $cache;
 
     public function __construct(
         LessonRepositoryInterface $lessonRepository,
-        StudentRepositoryInterface $studentRepository
+        StudentRepositoryInterface $studentRepository,
+        RedisCacheService $cache
     ) {
         $this->lessonRepository = $lessonRepository;
         $this->studentRepository = $studentRepository;
+        $this->cache = $cache;
     }
 
     /**
@@ -33,7 +38,18 @@ class LessonController extends Controller
                 $filters['topic_id'] = $request->topic_id;
             }
 
-            $lessons = $this->lessonRepository->getAll($filters);
+            // Cache lessons list for 1 hour
+            $cacheKey = isset($filters['topic_id']) 
+                ? "lessons:topic:{$filters['topic_id']}" 
+                : 'lessons:all';
+            
+            $lessons = Cache::remember(
+                $cacheKey,
+                RedisCacheService::CACHE_LONG,
+                function () use ($filters) {
+                    return $this->lessonRepository->getAll($filters);
+                }
+            );
 
             return response()->json([
                 'data' => $lessons,
@@ -57,7 +73,14 @@ class LessonController extends Controller
     public function show($id)
     {
         try {
-            $lesson = $this->lessonRepository->getByIdWithDetails($id);
+            // Cache lesson details for 1 hour
+            $lesson = Cache::remember(
+                "lessons:{$id}:details",
+                RedisCacheService::CACHE_LONG,
+                function () use ($id) {
+                    return $this->lessonRepository->getByIdWithDetails($id);
+                }
+            );
 
             if (!$lesson) {
                 return response()->json([
@@ -87,7 +110,14 @@ class LessonController extends Controller
     public function getQuestions($lessonId)
     {
         try {
-            $questions = $this->lessonRepository->getQuestionsByLesson($lessonId);
+            // Cache lesson questions for 1 hour
+            $questions = Cache::remember(
+                "lessons:{$lessonId}:questions",
+                RedisCacheService::CACHE_LONG,
+                function () use ($lessonId) {
+                    return $this->lessonRepository->getQuestionsByLesson($lessonId);
+                }
+            );
 
             if ($questions === null) {
                 return response()->json([
@@ -117,7 +147,14 @@ class LessonController extends Controller
     public function getExercise($lessonId)
     {
         try {
-            $data = $this->lessonRepository->getExerciseByLesson($lessonId);
+            // Cache lesson exercise for 1 hour
+            $data = Cache::remember(
+                "lessons:{$lessonId}:exercise",
+                RedisCacheService::CACHE_LONG,
+                function () use ($lessonId) {
+                    return $this->lessonRepository->getExerciseByLesson($lessonId);
+                }
+            );
 
             if ($data === null) {
                 return response()->json([
@@ -169,6 +206,9 @@ class LessonController extends Controller
                 $request->lesson_exercise_id,
                 $request->score
             );
+
+            // Clear related caches after exercise submission
+            $this->cache->clearStudentCache($student->id);
 
             return response()->json([
                 'data' => $progress,

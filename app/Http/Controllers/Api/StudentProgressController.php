@@ -5,14 +5,20 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Repositories\Interfaces\StudentRepositoryInterface;
+use App\Services\RedisCacheService;
+use Illuminate\Support\Facades\Cache;
 
 class StudentProgressController extends Controller
 {
     protected $studentRepository;
+    protected $cache;
 
-    public function __construct(StudentRepositoryInterface $studentRepository)
-    {
+    public function __construct(
+        StudentRepositoryInterface $studentRepository,
+        RedisCacheService $cache
+    ) {
         $this->studentRepository = $studentRepository;
+        $this->cache = $cache;
     }
 
     public function getAverageScore(Request $request)
@@ -22,9 +28,20 @@ class StudentProgressController extends Controller
                 'user_id' => 'required|exists:users,id'
             ]);
 
-            $student = $this->studentRepository->findByUserId($request->user_id);
+            $userId = $request->user_id;
+            
+            // Cache average score for 30 minutes
+            $data = Cache::remember("student:avg_score:{$userId}", RedisCacheService::CACHE_MEDIUM, function () use ($userId) {
+                $student = $this->studentRepository->findByUserId($userId);
+                
+                if (!$student) {
+                    return null;
+                }
+                
+                return $this->studentRepository->getAverageScore($student->id);
+            });
 
-            if (!$student) {
+            if ($data === null) {
                 return response()->json([
                     'data' => null,
                     'message' => 'Student not found for the given user ID',
@@ -33,13 +50,11 @@ class StudentProgressController extends Controller
                 ], 404);
             }
 
-            $data = $this->studentRepository->getAverageScore($student->id);
-
             return response()->json([
                 'data' => $data,
                 'message' => 'Average score calculated successfully',
                 'success' => true,
-                'remark' => 'Computed average of highest scores per lesson exercise'
+                'remark' => 'Computed average of highest scores per lesson exercise (cached)'
             ]);
 
         } catch (\Illuminate\Validation\ValidationException $e) {
@@ -66,9 +81,20 @@ class StudentProgressController extends Controller
                 'user_id' => 'required|exists:users,id'
             ]); 
 
-            $student = $this->studentRepository->findByUserId($request->user_id);
+            $userId = $request->user_id;
+            
+            // Cache overall progress for 15 minutes
+            $data = Cache::remember("student:overall_progress:{$userId}", RedisCacheService::CACHE_SHORT, function () use ($userId) {
+                $student = $this->studentRepository->findByUserId($userId);
+                
+                if (!$student) {
+                    return null;
+                }
+                
+                return $this->studentRepository->getOverallProgress($student->id);
+            });
 
-            if (!$student) {
+            if ($data === null) {
                 return response()->json([
                     'data' => null,
                     'message' => 'Student not found',
@@ -77,13 +103,11 @@ class StudentProgressController extends Controller
                 ], 404);
             }
 
-            $data = $this->studentRepository->getOverallProgress($student->id);
-
             return response()->json([
                 'data' => $data,
                 'message' => 'Student progress retrieved successfully',
                 'success' => true,
-                'remark' => 'Calculated overall student progress across all lessons'
+                'remark' => 'Calculated overall student progress across all lessons (cached)'
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -109,9 +133,20 @@ class StudentProgressController extends Controller
                 'user_id' => 'required|exists:users,id'
             ]);
 
-            $student = $this->studentRepository->findByUserId($request->user_id);
+            $userId = $request->user_id;
+            
+            // Cache topics progress for 15 minutes
+            $progressData = Cache::remember("student:topics_progress:{$userId}", RedisCacheService::CACHE_SHORT, function () use ($userId) {
+                $student = $this->studentRepository->findByUserId($userId);
+                
+                if (!$student) {
+                    return null;
+                }
+                
+                return $this->studentRepository->getTopicsProgress($student->id);
+            });
 
-            if (!$student) {
+            if ($progressData === null) {
                 return response()->json([
                     'data' => null,
                     'message' => 'Student not found',
@@ -120,13 +155,11 @@ class StudentProgressController extends Controller
                 ], 404);
             }
 
-            $progressData = $this->studentRepository->getTopicsProgress($student->id);
-
             return response()->json([
                 'data' => $progressData,
                 'message' => 'Topics progress retrieved successfully',
                 'success' => true,
-                'remark' => 'Calculated student progress for all active topics'
+                'remark' => 'Retrieved progress for all topics (cached)'
             ]);
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -148,9 +181,20 @@ class StudentProgressController extends Controller
     public function getLessonExerciseHistory(Request $request)
     {
         try {
-            $student = $this->studentRepository->findByUserId($request->user()->id);
+            $userId = $request->user()->id;
+            
+            // Cache lesson exercise history for 10 minutes
+            $history = Cache::remember("student:lesson_exercise_history:{$userId}", 600, function () use ($userId) {
+                $student = $this->studentRepository->findByUserId($userId);
+                
+                if (!$student) {
+                    return null;
+                }
+                
+                return $this->studentRepository->getLessonExerciseHistory($student->id);
+            });
 
-            if (!$student) {
+            if ($history === null) {
                 return response()->json([
                     'data' => null,
                     'message' => 'Student not found',
@@ -159,13 +203,11 @@ class StudentProgressController extends Controller
                 ], 404);
             }
 
-            $history = $this->studentRepository->getLessonExerciseHistory($student->id);
-
             return response()->json([
                 'data' => $history,
                 'message' => 'Lesson exercise history retrieved successfully',
                 'success' => true,
-                'remark' => 'All lesson exercise progress records for the student'
+                'remark' => 'All lesson exercise progress records for the student (cached)'
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -180,9 +222,20 @@ class StudentProgressController extends Controller
     public function getChapterExerciseHistory(Request $request)
     {
         try {
-            $student = $this->studentRepository->findByUserId($request->user()->id);
+            $userId = $request->user()->id;
+            
+            // Cache chapter exercise history for 10 minutes
+            $history = Cache::remember("student:chapter_exercise_history:{$userId}", 600, function () use ($userId) {
+                $student = $this->studentRepository->findByUserId($userId);
+                
+                if (!$student) {
+                    return null;
+                }
+                
+                return $this->studentRepository->getChapterExerciseHistory($student->id);
+            });
 
-            if (!$student) {
+            if ($history === null) {
                 return response()->json([
                     'data' => null,
                     'message' => 'Student not found',
@@ -191,13 +244,11 @@ class StudentProgressController extends Controller
                 ], 404);
             }
 
-            $history = $this->studentRepository->getChapterExerciseHistory($student->id);
-
             return response()->json([
                 'data' => $history,
                 'message' => 'Chapter exercise history retrieved successfully',
                 'success' => true,
-                'remark' => 'All chapter exercise progress records for the student'
+                'remark' => 'All chapter exercise progress records for the student (cached)'
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -212,9 +263,20 @@ class StudentProgressController extends Controller
     public function getExamHistory(Request $request)
     {
         try {
-            $student = $this->studentRepository->findByUserId($request->user()->id);
+            $userId = $request->user()->id;
+            
+            // Cache exam history for 10 minutes
+            $history = Cache::remember("student:exam_history:{$userId}", 600, function () use ($userId) {
+                $student = $this->studentRepository->findByUserId($userId);
+                
+                if (!$student) {
+                    return null;
+                }
+                
+                return $this->studentRepository->getExamHistory($student->id);
+            });
 
-            if (!$student) {
+            if ($history === null) {
                 return response()->json([
                     'data' => null,
                     'message' => 'Student not found',
@@ -223,13 +285,11 @@ class StudentProgressController extends Controller
                 ], 404);
             }
 
-            $history = $this->studentRepository->getExamHistory($student->id);
-
             return response()->json([
                 'data' => $history,
                 'message' => 'Exam history retrieved successfully',
                 'success' => true,
-                'remark' => 'All exam progress records for the student'
+                'remark' => 'All exam progress records for the student (cached)'
             ]);
         } catch (\Exception $e) {
             return response()->json([

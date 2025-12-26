@@ -12,9 +12,16 @@ use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\ResetPasswordMail;
 use Illuminate\Support\Facades\DB;
+use App\Services\RedisCacheService;
 
 class AuthController extends Controller
 {
+    protected $cache;
+    
+    public function __construct(RedisCacheService $cache)
+    {
+        $this->cache = $cache;
+    }
     /**
      * Register a new user
      */
@@ -156,11 +163,16 @@ class AuthController extends Controller
      */
     public function user(Request $request)
     {
+        $userId = $request->user()->id;
+        
+        // Cache user data for 1 hour
+        $user = $this->cache->getUserCache($userId, RedisCacheService::CACHE_LONG);
+        
         return response()->json([
-            'data' => $request->user(),
+            'data' => $user,
             'message' => 'User data retrieved successfully',
             'success' => true,
-            'remark' => 'Current authenticated user information'
+            'remark' => 'Current authenticated user information (cached)'
         ]);
     }
 
@@ -358,6 +370,9 @@ class AuthController extends Controller
             // Update password
             $user->password = Hash::make($request->password);
             $user->save();
+
+            // Clear user cache after password change
+            $this->cache->clearUserCache($user->id);
 
             // Revoke all tokens for security
             $user->tokens()->delete();

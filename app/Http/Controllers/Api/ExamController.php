@@ -362,42 +362,76 @@ class ExamController extends Controller
                 ], 404);
             }
 
-            $result = $this->examRepository->submitExam(
-                $request->exam_id,
-                $student->id,
-                $request->session_token,
-                $request->device_fingerprint,
-                $request->score
-            );
+            // Acquire lock to prevent concurrent submissions
+            $lockKey = "exam:submit:{$request->exam_id}:student:{$student->id}";
+            $lock = Cache::lock($lockKey, 10); // 10 second timeout
 
-            if ($result === null) {
+            if (!$lock->get()) {
                 return response()->json([
                     'data' => null,
-                    'message' => 'Invalid submission',
+                    'message' => 'Submission already in progress',
                     'success' => false,
-                    'remark' => 'Session invalid, exam completed, or device mismatch'
-                ], 403);
+                    'remark' => 'Please wait for the current submission to complete'
+                ], 409); // HTTP 409 Conflict
             }
 
-            // Clear student caches after exam submission
-            $this->cache->clearStudentCache($student->id);
-            Cache::forget("students:{$student->id}:exam_history");
+            try {
+                // Double-check if already submitted (after acquiring lock)
+                $existingProgress = StudentExamProgress::where('student_id', $student->id)
+                    ->where('exam_id', $request->exam_id)
+                    ->first();
 
-            if ($result['has_violations']) {
+                if ($existingProgress && $existingProgress->is_completed) {
+                    return response()->json([
+                        'data' => null,
+                        'message' => 'Exam already submitted',
+                        'success' => false,
+                        'remark' => 'This exam has already been completed'
+                    ], 403);
+                }
+
+                // Proceed with submission
+                $result = $this->examRepository->submitExam(
+                    $request->exam_id,
+                    $student->id,
+                    $request->session_token,
+                    $request->device_fingerprint,
+                    $request->score
+                );
+
+                if ($result === null) {
+                    return response()->json([
+                        'data' => null,
+                        'message' => 'Invalid submission',
+                        'success' => false,
+                        'remark' => 'Session invalid, exam completed, or device mismatch'
+                    ], 403);
+                }
+
+                // Clear student caches after exam submission
+                $this->cache->clearStudentCache($student->id);
+                Cache::forget("students:{$student->id}:exam_history");
+
+                if ($result['has_violations']) {
+                    return response()->json([
+                        'data' => null,
+                        'message' => 'Exam violations detected',
+                        'success' => false,
+                        'remark' => 'Exam marked as invalid due to violations (score: 0)'
+                    ], 403);
+                }
+
                 return response()->json([
-                    'data' => null,
-                    'message' => 'Exam violations detected',
-                    'success' => false,
-                    'remark' => 'Exam marked as invalid due to violations (score: 0)'
-                ], 403);
-            }
+                    'data' => $result['progress'],
+                    'message' => 'Exam submitted successfully',
+                    'success' => true,
+                    'remark' => 'Submission record created'
+                ]);
 
-            return response()->json([
-                'data' => $result['progress'],
-                'message' => 'Exam submitted successfully',
-                'success' => true,
-                'remark' => 'Submission record created'
-            ]);
+            } finally {
+                // Always release the lock
+                $lock->release();
+            }
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([

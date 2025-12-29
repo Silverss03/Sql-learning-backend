@@ -113,10 +113,10 @@ class AdminController extends Controller
 
         try {
             $request->validate([
-                'file' => 'required|file|mimes:xlsx,xls,csv'
+                'xlsx_file' => 'required|file|mimes:xlsx,xls,csv'
             ]);
 
-            $file = $request->file('file');
+            $file = $request->file('xlsx_file');
             $spreadsheet = IOFactory::load($file->getRealPath());
             $worksheet = $spreadsheet->getActiveSheet();
             $rows = $worksheet->toArray();
@@ -672,10 +672,10 @@ class AdminController extends Controller
 
         try {
             $request->validate([
-                'file' => 'required|file|mimes:xlsx,xls,csv'
+                'xlsx_file' => 'required|file|mimes:xlsx,xls,csv'
             ]);
 
-            $file = $request->file('file');
+            $file = $request->file('xlsx_file');
             $spreadsheet = IOFactory::load($file->getRealPath());
             $worksheet = $spreadsheet->getActiveSheet();
             $rows = $worksheet->toArray();
@@ -683,46 +683,94 @@ class AdminController extends Controller
             $createdStudents = [];
             $errors = [];
 
+            // Skip header row
+            array_shift($rows);
+
+            // Pre-check all emails to avoid partial failures
+            $emails = array_column($rows, 0);
+            $existingEmails = User::whereIn('email', $emails)
+                ->pluck('email')
+                ->toArray();
+
             DB::beginTransaction();
 
-            foreach ($rows as $index => $row) {
-                // Skip header row
-                if ($index === 0) continue;
+            // Process in chunks of 100
+            $chunks = array_chunk($rows, 100);
 
-                $email = $row[0] ?? null;
-                $name = $row[1] ?? null;
-                $password = $row[2] ?? '1';
-                $classId = $row[3] ?? null;
+            foreach ($chunks as $chunkIndex => $chunk) {
+                $usersToInsert = [];
+                $studentsToInsert = [];
+                $now = now();
 
-                if (!$email || !$name) {
-                    $errors[] = "Row " . ($index + 1) . ": Missing email or name";
-                    continue;
-                }
+                foreach ($chunk as $rowIndex => $row) {
+                    $email = $row[0] ?? null;
+                    $password = $row[1] ?? '1';
+                    $name = $row[2] ?? null;
+                    $studentCode = $row[3] ?? null;
+                    $classId = $row[4] ?? null;
 
-                // Check if user already exists
-                if (User::where('email', $email)->exists()) {
-                    $errors[] = "Row " . ($index + 1) . ": Email $email already exists";
-                    continue;
-                }
+                    $actualIndex = ($chunkIndex * 100) + $rowIndex + 2; // +2 for header and 0-index
 
-                try {
-                    $user = User::create([
+                    if (!$email || !$name) {
+                        $errors[] = "Row $actualIndex: Missing email or name";
+                        continue;
+                    }
+
+                    if (in_array($email, $existingEmails)) {
+                        $errors[] = "Row $actualIndex: Email $email already exists";
+                        continue;
+                    }
+
+                    if ($classId && !ClassModel::where('id', $classId)->exists()) {
+                        $errors[] = "Row $actualIndex: Class ID $classId does not exist";
+                        continue;
+                    }
+
+                    $usersToInsert[] = [
                         'email' => $email,
                         'name' => $name,
                         'password' => Hash::make($password),
                         'role' => 'student',
                         'is_active' => true,
-                    ]);
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
 
-                    $student = Student::create([
-                        'user_id' => $user->id,
-                        'class_id' => $classId
-                    ]);
+                    // Store class_id and student_code for later
+                    $createdStudents[] = [
+                        'email' => $email,
+                        'class_id' => $classId,
+                        'student_code' => $studentCode,
+                    ];
+                }
 
-                    $createdStudents[] = $student;
+                if (!empty($usersToInsert)) {
+                    // Bulk insert users
+                    User::insert($usersToInsert);
 
-                } catch (\Exception $e) {
-                    $errors[] = "Row " . ($index + 1) . ": " . $e->getMessage();
+                    // Get inserted user IDs
+                    $insertedUsers = User::whereIn('email', array_column($usersToInsert, 'email'))
+                        ->orderBy('id')
+                        ->get()
+                        ->keyBy('email');
+
+                    // Prepare student records
+                    foreach ($createdStudents as $index => $studentData) {
+                        if (isset($insertedUsers[$studentData['email']])) {
+                            $studentsToInsert[] = [
+                                'user_id' => $insertedUsers[$studentData['email']]->id,
+                                'class_id' => $studentData['class_id'],
+                                'student_code' => $studentData['student_code'],
+                                'created_at' => $now,
+                                'updated_at' => $now,
+                            ];
+                        }
+                    }
+
+                    // Bulk insert students
+                    if (!empty($studentsToInsert)) {
+                        Student::insert($studentsToInsert);
+                    }
                 }
             }
 
@@ -730,15 +778,14 @@ class AdminController extends Controller
 
             return response()->json([
                 'data' => [
-                    'created' => $createdStudents,
+                    'total_created' => count($createdStudents) - count($errors),
+                    'total_errors' => count($errors),
                     'errors' => $errors,
-                    'total_created' => count($createdStudents),
-                    'total_errors' => count($errors)
                 ],
                 'message' => 'Batch student creation completed',
                 'success' => true,
-                'remark' => count($createdStudents) . ' students created, ' . count($errors) . ' errors'
-            ]);
+                'remark' => (count($createdStudents) - count($errors)) . ' students created, ' . count($errors) . ' errors'
+            ], 201);
 
         } catch (ValidationException $e) {
             DB::rollBack();

@@ -158,12 +158,13 @@ class FirebaseNotificationService
         ];
 
         // 1. Fetch active device tokens for students in the class
+        // Direct query using student_id - much cleaner!
         $deviceTokensData = DeviceToken::whereHas('student', function ($query) use ($classId) {
                 $query->where('class_id', $classId);
             })
             ->where('is_active', true)
-            ->select('user_id', 'device_token') // Select specific columns for speed
-            ->get();
+            ->with('student:id,user_id') // Eager load student with user_id
+            ->get(['id', 'student_id', 'device_token']); // Need 'id' for relationships to work!
 
         if ($deviceTokensData->isEmpty()) {
             return ['success' => 0, 'recipients_count' => 0];
@@ -176,27 +177,27 @@ class FirebaseNotificationService
         $result = $this->sendToMultipleDevices($deviceTokens, $title, $body, $data);
 
         // 4. Prepare data for BULK INSERT
-        // We get unique user_ids so we don't spam the database if a user has 2 phones
-        $uniqueUserIds = $deviceTokensData->pluck('user_id')->unique();
+        // Get unique user_ids from student->user relationship
+        $uniqueUserIds = $deviceTokensData->map(function($token) {
+            return $token->student->user_id ?? null;
+        })->filter()->unique();
         
         $now = now(); // Timestamp for bulk insert
         $notificationsToInsert = [];
 
         foreach ($uniqueUserIds as $userId) {
-            if ($userId) {
-                $notificationsToInsert[] = [
-                    'user_id' => $userId,
-                    'exam_id' => $examId,
-                    'title' => $title,
-                    'body' => $body,
-                    'data' => json_encode($data),
-                    'type' => 'exam_created',
-                    'status' => 'sent',
-                    'recipients_count' => 1,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
-            }
+            $notificationsToInsert[] = [
+                'user_id' => $userId,
+                'exam_id' => $examId,
+                'title' => $title,
+                'body' => $body,
+                'data' => json_encode($data),
+                'type' => 'exam_created',
+                'status' => 'sent',
+                'recipients_count' => 1,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
         }
 
         // 5. Run ONE single database query to insert all records

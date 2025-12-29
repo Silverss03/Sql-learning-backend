@@ -23,48 +23,74 @@ class QuestionRepository implements QuestionRepositoryInterface
             // Create exercise based on type
             $exercise = $this->createExercise($data);
 
-            $createdQuestions = [];
+            $questionsToInsert = [];
+            $mcQuestionsToInsert = [];
+            $sqlQuestionsToInsert = [];
 
-            foreach ($data['questions'] as $questionData) {
-                // Create base question
-                $question = Question::create([
-                    $this->getExerciseIdField($data['exercise_type']) => $exercise->id,
+            $now = now();
+            $exerciseIdField = $this->getExerciseIdField($data['exercise_type']);
+
+            foreach ($data['questions'] as $index => $questionData) {
+                $questionsToInsert[] = [
+                    $exerciseIdField => $exercise->id,
                     'question_type' => $questionData['type'],
                     'order_index' => $questionData['order_index'],
                     'question_title' => $questionData['title'],
                     'is_active' => true,
-                ]);
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
 
-                // Create specific question type
+            Question::insert($questionsToInsert);
+
+            $insertedQuestions = Question::where($exerciseIdField, $exercise->id)
+                ->orderBy('id')
+                ->get();
+
+            foreach ($data['questions'] as $index => $questionData) {
+                $questionId = $insertedQuestions[$index]->id;
+
                 if ($questionData['type'] === 'multiple_choice') {
-                    $details = MultipleChoiceQuestion::create([
-                        'question_id' => $question->id,
+                    $mcQuestionsToInsert[] = [
+                        'question_id' => $questionId,
                         'description' => $questionData['details']['description'],
                         'answer_A' => $questionData['details']['answer_A'],
                         'answer_B' => $questionData['details']['answer_B'],
                         'answer_C' => $questionData['details']['answer_C'],
                         'answer_D' => $questionData['details']['answer_D'],
                         'correct_answer' => $questionData['details']['correct_answer'],
-                        'is_active' => true
-                    ]);
-
-                    $question->multipleChoice = $details;
-                } else { // sql type
-                    $details = InteractiveSqlQuestion::create([
-                        'question_id' => $question->id,
+                        'is_active' => true,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                } else {
+                    $sqlQuestionsToInsert[] = [
+                        'question_id' => $questionId,
                         'interaction_type' => $questionData['details']['interaction_type'],
-                        'question_data' => $questionData['details']['question_data'],
-                        'solution_data' => $questionData['details']['solution_data'],
+                        'question_data' => json_encode($questionData['details']['question_data']),
+                        'solution_data' => json_encode($questionData['details']['solution_data']),
                         'description' => $questionData['details']['description'] ?? null,
-                    ]);
-
-                    $question->interactiveSqlQuestion = $details;
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
                 }
+            }
 
-                $createdQuestions[] = $question;
+            if (!empty($mcQuestionsToInsert)) {
+                MultipleChoiceQuestion::insert($mcQuestionsToInsert);
+            }
+
+            if (!empty($sqlQuestionsToInsert)) {
+                InteractiveSqlQuestion::insert($sqlQuestionsToInsert);
             }
 
             DB::commit();
+
+            $createdQuestions = Question::where($exerciseIdField, $exercise->id)
+                ->with(['multipleChoice', 'interactiveSqlQuestion'])
+                ->orderBy('id')
+                ->get();
 
             return [
                 'exercise' => $exercise,

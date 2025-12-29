@@ -7,7 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 class DeviceToken extends Model
 {
     protected $fillable = [
-        'user_id',
         'student_id',
         'device_token',
         'platform',
@@ -19,11 +18,6 @@ class DeviceToken extends Model
         'is_active' => 'boolean',
         'last_used_at' => 'datetime',
     ];
-
-    public function user()
-    {
-        return $this->belongsTo(User::class);
-    }
 
     public function student()
     {

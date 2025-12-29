@@ -51,8 +51,7 @@ class DeviceTokenController extends Controller
             } else {
                 // Create new token
                 $deviceToken = DeviceToken::create([
-                    'user_id' => $user->id,
-                    'student_id' => $student ? $student->id : null,
+                    'student_id' => $student->id,
                     'device_token' => $request->device_token,
                     'platform' => $request->device_type,
                     'is_active' => true,
@@ -61,7 +60,7 @@ class DeviceTokenController extends Controller
             }
 
             // Subscribe to class topic if student has a class
-            if ($student && $student->class_id) {
+            if ($student->class_id) {
                 $topic = "class_{$student->class_id}";
                 $this->firebaseService->subscribeToTopic($request->device_token, $topic);
             }
@@ -97,7 +96,18 @@ class DeviceTokenController extends Controller
     {
         try {
             $user = $request->user();
-            $tokens = DeviceToken::where('user_id', $user->id)
+            $student = $this->studentRepository->findByUserId($user->id);
+
+            if (!$student) {
+                return response()->json([
+                    'data' => [],
+                    'message' => 'User is not a student',
+                    'success' => true,
+                    'remark' => 'No device tokens for non-student users'
+                ]);
+            }
+
+            $tokens = DeviceToken::where('student_id', $student->id)
                 ->where('is_active', true)
                 ->get();
 
@@ -105,7 +115,7 @@ class DeviceTokenController extends Controller
                 'data' => $tokens,
                 'message' => 'Device tokens retrieved successfully',
                 'success' => true,
-                'remark' => 'All active device tokens for the user'
+                'remark' => 'All active device tokens for the student'
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -124,8 +134,19 @@ class DeviceTokenController extends Controller
     {
         try {
             $user = $request->user();
+            $student = $this->studentRepository->findByUserId($user->id);
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'User is not a student',
+                    'success' => false,
+                    'remark' => 'Cannot delete device tokens for non-student users'
+                ], 403);
+            }
+
             $deviceToken = DeviceToken::where('id', $id)
-                ->where('user_id', $user->id)
+                ->where('student_id', $student->id)
                 ->first();
 
             if (!$deviceToken) {
@@ -133,13 +154,12 @@ class DeviceTokenController extends Controller
                     'data' => null,
                     'message' => 'Device token not found',
                     'success' => false,
-                    'remark' => 'Token does not exist or does not belong to user'
+                    'remark' => 'Token does not exist or does not belong to student'
                 ], 404);
             }
 
             // Unsubscribe from topics before deleting
-            $student = $this->studentRepository->findByUserId($user->id);
-            if ($student && $student->class_id) {
+            if ($student->class_id) {
                 $topic = "class_{$student->class_id}";
                 $this->firebaseService->unsubscribeFromTopic($deviceToken->device_token, $topic);
             }
@@ -174,8 +194,19 @@ class DeviceTokenController extends Controller
             ]);
 
             $user = $request->user();
+            $student = $this->studentRepository->findByUserId($user->id);
+
+            if (!$student) {
+                return response()->json([
+                    'data' => null,
+                    'message' => 'User is not a student',
+                    'success' => false,
+                    'remark' => 'Cannot delete device tokens for non-student users'
+                ], 403);
+            }
+
             $deviceToken = DeviceToken::where('device_token', $request->device_token)
-                ->where('user_id', $user->id)
+                ->where('student_id', $student->id)
                 ->first();
 
             if (!$deviceToken) {
@@ -188,8 +219,7 @@ class DeviceTokenController extends Controller
             }
 
             // Unsubscribe from topics
-            $student = $this->studentRepository->findByUserId($user->id);
-            if ($student && $student->class_id) {
+            if ($student->class_id) {
                 $topic = "class_{$student->class_id}";
                 $this->firebaseService->unsubscribeFromTopic($request->device_token, $topic);
             }
@@ -214,53 +244,6 @@ class DeviceTokenController extends Controller
             return response()->json([
                 'data' => null,
                 'message' => 'Failed to delete device token',
-                'success' => false,
-                'remark' => $e->getMessage()
-            ], 500);
-        }
-    }
-
-    /**
-     * Test notification (for debugging)
-     */
-    public function testNotification(Request $request)
-    {
-        try {
-            $request->validate([
-                'device_token' => 'required|string',
-                'title' => 'string',
-                'body' => 'string',
-            ]);
-
-            $title = $request->title ?? 'Test Notification';
-            $body = $request->body ?? 'This is a test notification from SQL Learning App';
-
-            $result = $this->firebaseService->sendToDevice(
-                $request->device_token,
-                $title,
-                $body,
-                ['type' => 'test']
-            );
-
-            if ($result) {
-                return response()->json([
-                    'data' => ['sent' => true],
-                    'message' => 'Test notification sent successfully',
-                    'success' => true,
-                    'remark' => 'Check your device for the notification'
-                ]);
-            } else {
-                return response()->json([
-                    'data' => ['sent' => false],
-                    'message' => 'Failed to send test notification',
-                    'success' => false,
-                    'remark' => 'Check logs for more details'
-                ], 500);
-            }
-        } catch (\Exception $e) {
-            return response()->json([
-                'data' => null,
-                'message' => 'Failed to send test notification',
                 'success' => false,
                 'remark' => $e->getMessage()
             ], 500);
